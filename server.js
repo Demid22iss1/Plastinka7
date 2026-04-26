@@ -10,7 +10,6 @@ const app = express();
 const db = new sqlite3.Database("./database.sqlite");
 db.run("PRAGMA encoding = 'UTF-8'");
 db.run("PRAGMA case_sensitive_like = OFF");
-const PORT = process.env.PORT || 3000;
 
 // ============================================================
 // НАСТРОЙКИ MIDDLEWARE
