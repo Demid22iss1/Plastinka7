@@ -2147,27 +2147,6 @@ app.get("/profile", requireAuth, (req, res) => {
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css">
-<style>
-/* Дополнительные стили для профиля (можно вынести в style.css) */
-.profile-wrapper{max-width:1000px;margin:40px auto;padding:0 20px}
-.profile-card{background:rgba(24,24,24,0.95);border-radius:32px;border:1px solid rgba(255,0,0,0.3);overflow:hidden}
-.profile-cover{height:160px;background:linear-gradient(135deg,#ff0000,#990000);position:relative}
-.profile-avatar-wrapper{position:relative;text-align:center;margin-top:-70px;z-index:2}
-.profile-avatar{width:130px;height:130px;border-radius:50%;border:5px solid #1a1a1a;object-fit:cover;cursor:pointer}
-.avatar-overlay{position:absolute;bottom:5px;right:5px;background:#ff0000;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer}
-.profile-name{text-align:center;font-size:32px;margin-top:15px}
-.profile-role{text-align:center;color:#ff4444;margin-top:5px}
-.profile-stats{display:flex;justify-content:center;gap:60px;padding:25px;background:rgba(0,0,0,0.3);margin:25px 30px;border-radius:24px}
-.stat{text-align:center;padding:10px 20px;background:rgba(255,255,255,0.05);border-radius:20px}
-.stat-value{font-size:32px;font-weight:bold;color:#ff4444}
-.profile-menu{margin:20px 30px 30px;display:flex;flex-direction:column;gap:12px}
-.menu-item{display:flex;align-items:center;gap:18px;padding:16px 20px;background:rgba(10,10,10,0.6);border-radius:20px;cursor:pointer;border:1px solid #333}
-.menu-item:hover{background:rgba(255,0,0,0.1);border-color:#ff0000}
-.admin-panel-btn,.logout-btn{display:block;margin:15px 30px;padding:16px;text-align:center;border-radius:20px;font-weight:bold;text-decoration:none}
-.admin-panel-btn{background:linear-gradient(45deg,#ff0000,#990000);color:white}
-.logout-btn{background:transparent;color:#ff4444;border:1px solid #ff4444}
-footer{text-align:center;padding:40px;background:#0a0a0a;margin-top:60px}
-</style>
 </head>
 <body>
 <header>
@@ -2200,14 +2179,41 @@ footer{text-align:center;padding:40px;background:#0a0a0a;margin-top:60px}
 </div>
 <footer><img src="/photo/logo-2.svg" class="footer-logo" alt="Plastinka"></footer>
 
-<!-- Модалки (аватар, настройки) – скопируйте из существующего десктопного кода профиля -->
-<!-- ... (они уже есть в вашем исходном коде в блоке else) ... -->
+<!-- Модалки (аватар, настройки, избранное) – скопируйте из вашего существующего кода -->
+<div id="avatarModal" class="modal-overlay" style="display:none;">
+    <div class="modal-content" style="text-align:center;">
+        <button class="modal-close" onclick="closeAvatarModal()">&times;</button>
+        <h3 style="color:#ff7a2f; margin-bottom:20px;">📸 Изменить аватар</h3>
+        <div style="margin-bottom:20px;"><div style="width:150px; height:150px; margin:0 auto; overflow:hidden; border-radius:50%; border:3px solid #ff7a2f;"><img src="/avatars/${avatar}" id="avatarPreview" style="width:100%; height:100%; object-fit:cover;"></div></div>
+        <input type="file" id="avatarFileInput" accept="image/*" style="display:none;" onchange="loadImageForCrop()">
+        <button type="button" onclick="document.getElementById('avatarFileInput').click()" style="background:rgba(255,122,47,0.2); border:1px solid #ff7a2f; color:#ff7a2f; padding:10px 20px; border-radius:8px; cursor:pointer; width:100%; margin-bottom:10px;">📁 Выбрать изображение</button>
+        <div id="cropContainer" style="display:none; margin-top:15px;"><div style="width:100%; height:300px; margin-bottom:10px;"><img id="cropImage" style="max-width:100%; max-height:100%;"></div><button onclick="cropAndUpload()" class="submit-review-btn" style="margin-top:5px;">✂️ Обрезать и загрузить</button></div>
+        <p id="avatarUploadMessage" style="margin-top:10px; font-size:12px;"></p>
+    </div>
+</div>
+<div id="settingsModal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeSettingsModal()">&times;</button>
+        <h3 style="color:#ff7a2f; margin-bottom:20px;">⚙️ Настройки аккаунта</h3>
+        <form id="settingsForm">
+            <input type="text" id="settingsUsername" value="${escapeHtml(user.username)}" placeholder="Имя пользователя" style="width:100%; padding:10px; margin-bottom:10px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+            <input type="password" id="settingsCurrentPassword" placeholder="Текущий пароль (для смены)" style="width:100%; padding:10px; margin-bottom:10px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+            <input type="password" id="settingsNewPassword" placeholder="Новый пароль" style="width:100%; padding:10px; margin-bottom:10px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+            <button type="submit" class="modal-add-to-cart">Сохранить изменения</button>
+        </form>
+        <p id="settingsMessage" style="margin-top:10px; text-align:center;"></p>
+    </div>
+</div>
+<div id="favoritesModal" class="modal-overlay" style="display:none;">
+    <div class="modal-content" style="max-width:600px; max-height:80vh; overflow-y:auto;">
+        <button class="modal-close" onclick="closeFavoritesModal()">&times;</button>
+        <h3 style="color:#ff7a2f; text-align:center;"><i class="fas fa-heart"></i> Моё избранное</h3>
+        <div id="favoritesList" style="display:flex; flex-direction:column; gap:15px;"><div style="text-align:center; padding:40px; color:#666;"><i class="fas fa-spinner fa-spin"></i><br>Загрузка...</div></div>
+    </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
-<script>
-// Скопируйте все JS-функции из десктопной версии профиля (openAvatarModal, cropAndUpload, openSettingsModal, обновление профиля и т.д.)
-// Они уже были у вас в блоке else, просто перенесите их сюда.
-</script>
+<script src="/main.js"></script>
 </body>
 </html>`); // Здесь должен быть полный HTML десктопного профиля
         }
@@ -3340,17 +3346,7 @@ app.get("/cart", requireAuth, (req, res) => {
         const html = `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><title>Корзина</title><link rel="stylesheet" href="/style.css">
-<style>
-/* стили для корзины – можно добавить в style.css */
-.quantity-controls{display:flex;align-items:center;justify-content:center;gap:15px;margin:15px 0}
-.quantity-btn{width:35px;height:35px;border-radius:50%;border:2px solid #D74307;background:transparent;color:#D74307;font-size:20px;cursor:pointer}
-.quantity-value{font-size:20px;min-width:40px;text-align:center}
-.item-subtotal{font-size:18px;font-weight:bold;color:#D74307;margin:10px 0;display:block}
-.cart-summary{background:#2A2A2A;border-radius:12px;padding:30px;margin-top:40px;max-width:600px;margin-left:auto;margin-right:auto}
-.summary-row{display:flex;justify-content:space-between;padding:15px 0;border-bottom:1px solid #333}
-.summary-value.total{color:#D74307;font-size:32px}
-.order-btn{width:100%;padding:15px;background:linear-gradient(45deg,#D74307,#ff6b2b);color:#fff;border:none;border-radius:8px;font-size:20px;cursor:pointer}
-</style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
 <header>
@@ -3370,13 +3366,7 @@ app.get("/cart", requireAuth, (req, res) => {
     ` : ''}
 </section>
 <footer><img src="/photo/logo-2.svg" class="footer-logo" alt="Plastinka"></footer>
-<script>
-document.querySelectorAll('.increase').forEach(btn=>btn.addEventListener('click',function(){updateQuantity(this.dataset.productId,'increase');}));
-document.querySelectorAll('.decrease').forEach(btn=>btn.addEventListener('click',function(){updateQuantity(this.dataset.productId,'decrease');}));
-document.querySelectorAll('.remove-plastinka').forEach(btn=>btn.addEventListener('click',function(){if(confirm('Удалить товар?'))removeFromCart(this.dataset.productId);}));
-function updateQuantity(id,action){fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_id:id,action:action})}).then(r=>r.json()).then(data=>{if(data.success)location.reload();});}
-function removeFromCart(id){fetch('/remove-from-cart-ajax',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_id:id})}).then(r=>r.json()).then(data=>{if(data.success)location.reload();});}
-</script>
+<script src="/main.js"></script>
 </body>
 </html>`;
         res.send(html);
