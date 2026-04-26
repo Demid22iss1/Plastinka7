@@ -1,17 +1,15 @@
 services:
   - type: web
-    name: plastinka-shop
+    name: plastinka7
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install --build-from-source
     startCommand: node server.js
     envVars:
       - key: NODE_VERSION
-        value: 18.17.0
-      - key: SESSION_SECRET
-        generateValue: true
-      - key: PORT
-        value: 3000
+        value: 20.11.0
+      - key: NPM_CONFIG_PRODUCTION
+        value: false
     disk:
       name: sqlite-data
       mountPath: /opt/render/project/src
