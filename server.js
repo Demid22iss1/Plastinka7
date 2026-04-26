@@ -99,31 +99,8 @@ if (!homepageSetting || homepageSetting.count === 0) {
     console.log("⚙️ Добавлены настройки сайта");
 }
 
-// Добавление тестовых проигрывателей
-const playersCount = db.prepare("SELECT COUNT(*) as count FROM players").get();
-if (playersCount.count === 0) {
-    const players = [
-        ['Pro-Ject Debut Carbon', 499, 'proigrvatel1.png', 'Высококачественный проигрыватель винила с углеволокновым тонармом. Обеспечивает чистое и детальное звучание.'],
-        ['Audio-Technica AT-LP120', 299, 'proigrvatel2.png', 'Профессиональный проигрыватель с прямым приводом. Идеален для диджеев и аудиофилов.'],
-        ['Rega Planar 3', 899, 'proigrvatel3.png', 'Легендарный британский проигрыватель. Ручная сборка, высокое качество звучания.']
-    ];
-    const stmt = db.prepare("INSERT INTO players (name, price, image, description) VALUES (?, ?, ?, ?)");
-    for (const p of players) stmt.run(p);
-    console.log("🎵 Добавлены тестовые проигрыватели");
-}
 
-// Добавление тестовых пластинок
-const productsCount = db.prepare("SELECT COUNT(*) as count FROM products").get();
-if (productsCount.count === 0) {
-    const products = [
-        ['Dark Side of the Moon', 'Pink Floyd', 35, 'dark-side.png', 'dark-side.mp3', 'Легендарный альбом', 'Rock', '1973'],
-        ['Abbey Road', 'The Beatles', 40, 'abbey-road.png', 'abbey-road.mp3', 'Последний записанный альбом', 'Rock', '1969'],
-        ['Thriller', 'Michael Jackson', 45, 'thriller.png', 'thriller.mp3', 'Самый продаваемый альбом', 'Pop', '1982']
-    ];
-    const stmt = db.prepare("INSERT INTO products (name, artist, price, image, audio, description, genre, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    for (const p of products) stmt.run(p);
-    console.log("📀 Добавлены тестовые пластинки");
-}
+
 
 // Добавление дополнительных тестовых пластинок
 const productsCount2 = db.prepare("SELECT COUNT(*) as count FROM products").get();
@@ -143,13 +120,7 @@ if (productsCount2.count < 8) {
     console.log("📀 Добавлены дополнительные тестовые пластинки");
 }
 
-// Создание администратора
-const usersCount = db.prepare("SELECT COUNT(*) as count FROM users").get();
-if (usersCount.count === 0) {
-    const hash = bcrypt.hashSync("admin123", 10);
-    db.prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)").run("admin", hash, "admin");
-    console.log("👤 Создан пользователь admin с паролем admin123");
-}
+
 
 // Добавление колонки telegram_id в таблицу users
 try {
@@ -408,23 +379,7 @@ if (productsCount.count === 0) {
     console.log("📀 Добавлены тестовые пластинки");
 }
 
-// Добавление дополнительных тестовых пластинок
-const productsCount2 = db.prepare("SELECT COUNT(*) as count FROM products").get();
-if (productsCount2.count < 8) {
-    const extraProducts = [
-        ['Kind of Blue', 'Miles Davis', 45, 'kind-of-blue.png', null, 'Классический джазовый альбом', 'Jazz', '1959'],
-        ['Random Access Memories', 'Daft Punk', 38, 'ram.png', null, 'Электронный шедевр', 'Electronic', '2013'],
-        ['The Wall', 'Pink Floyd', 42, 'the-wall.png', null, 'Рок-опера', 'Rock', '1979'],
-        ['Back in Black', 'AC/DC', 35, 'back-in-black.png', null, 'Хард-рок', 'Rock', '1980'],
-        ['The Velvet Underground', 'The Velvet Underground', 40, 'velvet.png', null, 'Альтернативный рок', 'Rock', '1967'],
-        ['A Love Supreme', 'John Coltrane', 50, 'love-supreme.png', null, 'Джаз', 'Jazz', '1965'],
-        ['Discovery', 'Daft Punk', 36, 'discovery.png', null, 'Французский хаус', 'Electronic', '2001'],
-        ['Lateralus', 'Tool', 44, 'lateralus.png', null, 'Прогрессивный метал', 'Rock', '2001']
-    ];
-    const stmt = db.prepare("INSERT INTO products (name, artist, price, image, audio, description, genre, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    for (const p of extraProducts) stmt.run(p);
-    console.log("📀 Добавлены дополнительные тестовые пластинки");
-}
+
 
 // Создание администратора
 const usersCount = db.prepare("SELECT COUNT(*) as count FROM users").get();
