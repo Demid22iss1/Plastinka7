@@ -381,12 +381,6 @@ try {
     }
 }
 
-// Добавление настроек главной страницы по умолчанию
-const homepageSetting = db.prepare("SELECT COUNT(*) as count FROM site_settings WHERE key = ?").get('homepage_products');
-if (!homepageSetting || homepageSetting.count === 0) {
-    db.prepare("INSERT INTO site_settings (key, value) VALUES (?, ?)").run('homepage_products', 'last_added');
-    console.log("⚙️ Добавлены настройки сайта");
-}
 
 // Добавление тестовых проигрывателей
 const playersCount = db.prepare("SELECT COUNT(*) as count FROM players").get();
