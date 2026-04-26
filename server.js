@@ -3036,20 +3036,81 @@ app.get("/catalog", (req, res) => {
     const user = req.session.user;
     const { genre, minPrice, maxPrice, sort, search } = req.query;
     const { sql, params } = buildCatalogQuery(genre, minPrice, maxPrice, sort, search);
+    
     try {
         let products = db.prepare(sql).all(...params);
+        // Добавляем средний рейтинг для каждого товара
         for (const product of products) {
-            const rating = db.prepare(`SELECT AVG(rating) as avg_rating, COUNT(*) as votes_count FROM ratings WHERE product_id = ?`).get(product.id);
+            const rating = db.prepare(
+                `SELECT AVG(rating) as avg_rating, COUNT(*) as votes_count 
+                 FROM ratings WHERE product_id = ?`
+            ).get(product.id);
             product.avg_rating = rating?.avg_rating ? parseFloat(rating.avg_rating).toFixed(1) : 0;
             product.votes_count = rating?.votes_count || 0;
         }
+
+        // Генерируем HTML товаров
+        let productsHTML = '';
+        for (const p of products) {
+            productsHTML += `
+                <div class="product-card" data-product-id="${p.id}"
+                     data-product-name="${escapeHtml(p.name)}"
+                     data-product-artist="${escapeHtml(p.artist)}"
+                     data-product-price="${p.price}"
+                     data-product-image="/uploads/${p.image}"
+                     data-product-description="${escapeHtml(p.description || 'Нет описания')}"
+                     data-product-genre="${escapeHtml(p.genre || 'Rock')}"
+                     data-product-year="${escapeHtml(p.year || '1970')}"
+                     data-product-audio="${p.audio || ''}">
+                    <div class="product-image">
+                        <img src="/uploads/${p.image}" alt="${escapeHtml(p.name)}">
+                        <div class="vinyl-overlay">
+                            <img src="/photo/plastinka-audio.png" class="vinyl-icon">
+                        </div>
+                    </div>
+                    <div class="product-info">
+                        <div class="product-name">${escapeHtml(p.name)}</div>
+                        <div class="product-artist">${escapeHtml(p.artist)}</div>
+                        <div class="product-price">$${p.price}</div>
+                        <div class="product-actions">
+                            <button class="action-btn" onclick="event.stopPropagation(); addToCartMobile('product_${p.id}')">
+                                <i class="fas fa-shopping-cart"></i>
+                            </button>
+                            <button class="action-btn" onclick="event.stopPropagation(); toggleFavoriteMobile('product_${p.id}')">
+                                <i class="fas fa-heart"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (products.length === 0) {
+            productsHTML = '<div class="empty-state">😕 Товаров не найдено</div>';
+        }
+
+        // Форма фильтров (опционально)
         const genresResult = db.prepare("SELECT DISTINCT genre FROM products WHERE genre IS NOT NULL AND genre != ''").all();
-        const genres = genresResult.length ? genresResult.map(g => g.genre) : ['Rock','Pop','Jazz','Electronic','Classical'];
+        const genreOptions = genresResult.map(g => `<option value="${g.genre}" ${genre === g.genre ? 'selected' : ''}>${g.genre}</option>`).join('');
         
-        // Здесь должен быть остальной HTML каталога
-        res.send(`<!DOCTYPE html>...`);
+        const filterForm = `
+            <form method="GET" action="/catalog" class="filter-form" style="margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap; background:#1a1a1a; padding:16px; border-radius:12px;">
+                <input type="text" name="search" placeholder="Поиск..." value="${escapeHtml(search || '')}" style="flex:2; padding:10px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+                <select name="genre" style="flex:1; padding:10px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+                    <option value="all">Все жанры</option>
+                    ${genreOptions}
+                </select>
+                <input type="number" name="minPrice" placeholder="Цена от" value="${minPrice || ''}" style="width:100px; padding:10px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+                <input type="number" name="maxPrice" placeholder="Цена до" value="${maxPrice || ''}" style="width:100px; padding:10px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+                <button type="submit" class="action-btn primary" style="padding:10px 20px;">Фильтр</button>
+            </form>
+        `;
+
+        const content = filterForm + `<div class="products-grid">${productsHTML}</div>`;
+        res.send(renderMobilePage('Каталог', content, user, 'catalog'));
     } catch (err) {
-        res.status(500).send("Ошибка загрузки каталога");
+        console.error("Ошибка каталога:", err);
+        res.status(500).send(renderMobilePage('Ошибка', '<div class="empty-state">❌ Ошибка загрузки каталога</div>', user, 'catalog'));
     }
 });
 
@@ -3058,7 +3119,21 @@ app.get("/catalog", (req, res) => {
 // ============================================================
 app.get("/login", (req, res) => {
     if (req.session.user) return res.redirect("/");
-    res.send(`<!DOCTYPE html><html>...</html>`); // ваш HTML без изменений
+    
+    const error = req.query.error === '1';
+    const content = `
+        <div class="auth-container" style="max-width:400px; margin:40px auto; background:#1a1a1a; padding:30px; border-radius:20px;">
+            <h2 style="text-align:center; margin-bottom:30px; color:#ff7a2f;">🔐 Вход</h2>
+            ${error ? '<div class="error" style="background:#ff000020; border:1px solid #ff0000; padding:10px; border-radius:8px; margin-bottom:20px; color:#ff8888;">Неверное имя пользователя или пароль</div>' : ''}
+            <form method="POST" action="/login">
+                <input type="text" name="username" placeholder="Имя пользователя" required style="width:100%; padding:12px; margin-bottom:15px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+                <input type="password" name="password" placeholder="Пароль" required style="width:100%; padding:12px; margin-bottom:20px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+                <button type="submit" class="action-btn primary" style="width:100%; padding:12px;">Войти</button>
+            </form>
+            <p style="text-align:center; margin-top:20px;">Нет аккаунта? <a href="/register" style="color:#ff7a2f;">Зарегистрироваться</a></p>
+        </div>
+    `;
+    res.send(renderMobilePage('Вход', content, null, 'home'));
 });
 
 app.post("/login", (req, res) => {
@@ -3078,7 +3153,21 @@ app.post("/login", (req, res) => {
 
 app.get("/register", (req, res) => {
     if (req.session.user) return res.redirect("/");
-    res.send(`<!DOCTYPE html><html>...</html>`); // ваш HTML без изменений
+    
+    const error = req.query.error === 'exists';
+    const content = `
+        <div class="auth-container" style="max-width:400px; margin:40px auto; background:#1a1a1a; padding:30px; border-radius:20px;">
+            <h2 style="text-align:center; margin-bottom:30px; color:#ff7a2f;">📝 Регистрация</h2>
+            ${error ? '<div class="error" style="background:#ff000020; border:1px solid #ff0000; padding:10px; border-radius:8px; margin-bottom:20px; color:#ff8888;">Пользователь с таким именем уже существует</div>' : ''}
+            <form method="POST" action="/register">
+                <input type="text" name="username" placeholder="Имя пользователя" required style="width:100%; padding:12px; margin-bottom:15px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+                <input type="password" name="password" placeholder="Пароль" required style="width:100%; padding:12px; margin-bottom:20px; background:#111; border:1px solid #333; border-radius:8px; color:white;">
+                <button type="submit" class="action-btn primary" style="width:100%; padding:12px;">Зарегистрироваться</button>
+            </form>
+            <p style="text-align:center; margin-top:20px;">Уже есть аккаунт? <a href="/login" style="color:#ff7a2f;">Войти</a></p>
+        </div>
+    `;
+    res.send(renderMobilePage('Регистрация', content, null, 'home'));
 });
 
 app.post("/register", (req, res) => {
@@ -3094,9 +3183,110 @@ app.post("/register", (req, res) => {
     }
 });
 
-app.get("/logout", (req, res) => {
-    req.session.destroy();
-    res.redirect("/");
+// ============================================================
+// ===================== ИЗБРАННОЕ ============================
+// ============================================================
+app.get("/favorites", requireAuth, (req, res) => {
+    const user = req.session.user;
+    try {
+        // Получаем все записи избранного для текущего пользователя
+        const favorites = db.prepare(`
+            SELECT product_id, added_at 
+            FROM favorites 
+            WHERE user_id = ? 
+            ORDER BY added_at DESC
+        `).all(user.id);
+
+        let itemsHTML = '';
+        
+        for (const fav of favorites) {
+            const productId = fav.product_id;
+            let item = null;
+            let type = '';
+            let imagePath = '';
+            
+            if (productId.startsWith('product_')) {
+                type = 'product';
+                const id = productId.replace('product_', '');
+                item = db.prepare("SELECT * FROM products WHERE id = ?").get(id);
+                if (item) imagePath = `/uploads/${item.image}`;
+            } else if (productId.startsWith('player_')) {
+                type = 'player';
+                const id = productId.replace('player_', '');
+                item = db.prepare("SELECT * FROM players WHERE id = ?").get(id);
+                if (item) imagePath = `/photo/${item.image}`;
+            }
+            
+            if (!item) continue; // товар мог быть удалён
+            
+            itemsHTML += `
+                <div class="product-card" data-fav-id="${productId}" data-type="${type}">
+                    <div class="product-image">
+                        <img src="${imagePath}" alt="${escapeHtml(item.name)}" onerror="this.src='/photo/plastinka-audio.png'">
+                    </div>
+                    <div class="product-info">
+                        <div class="product-name">${escapeHtml(item.name)}</div>
+                        <div class="product-artist">${escapeHtml(type === 'product' ? item.artist : 'Проигрыватель')}</div>
+                        <div class="product-price">$${item.price}</div>
+                        <div class="product-actions">
+                            <button class="action-btn" onclick="addToCartMobile('${productId}')">
+                                <i class="fas fa-shopping-cart"></i>
+                            </button>
+                            <button class="action-btn" onclick="removeFromFavorites('${productId}', this)">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        if (itemsHTML === '') {
+            itemsHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❤️</div>
+                    <h3>Избранное пусто</h3>
+                    <p>Добавляйте понравившиеся пластинки, нажимая на сердечко</p>
+                    <a href="/catalog" class="empty-btn">Перейти в каталог</a>
+                </div>
+            `;
+        }
+        
+        // Добавляем JS-функцию для удаления из избранного прямо на странице
+        const script = `
+            <script>
+                function removeFromFavorites(productId, btnElement) {
+                    if (!confirm('Удалить из избранного?')) return;
+                    fetch('/api/favorites/toggle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: productId })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Удаляем карточку из DOM
+                            const card = btnElement.closest('.product-card');
+                            if (card) card.remove();
+                            showToastMobile('Удалено из избранного', false);
+                            // Если больше нет карточек, показываем сообщение
+                            if (document.querySelectorAll('.product-card').length === 0) {
+                                location.reload(); // или обновить содержимое
+                            }
+                        } else {
+                            showToastMobile('Ошибка', true);
+                        }
+                    });
+                }
+            </script>
+        `;
+        
+        const content = `<div class="products-grid">${itemsHTML}</div>${script}`;
+        res.send(renderMobilePage('Избранное', content, user, 'favorites'));
+    } catch (err) {
+        console.error("Ошибка загрузки избранного:", err);
+        res.status(500).send(renderMobilePage('Ошибка', '<div class="empty-state">❌ Ошибка загрузки</div>', user, 'favorites'));
+    }
 });
 
 // ============================================================
