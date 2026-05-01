@@ -957,68 +957,1312 @@ async function checkout() {
 });
 
 // ============================================================
-// ГЛАВНАЯ (упрощенная версия)
+// ===================== ГЛАВНАЯ СТРАНИЦА =====================
 // ============================================================
-app.get("/", (req, res) => {
-    const user = req.session.user;
-    const products = db.prepare("SELECT * FROM products ORDER BY id DESC LIMIT 6").all();
+
+function generateStarRatingHTML(rating, votesCount) {
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 >= 0.5;
+    let starsHtml = '';
     
-    let productsHtml = '';
-    for (const p of products) {
-        productsHtml += `
-            <div style="background:#1a1a1a;border-radius:12px;padding:15px;text-align:center">
-                <img src="/uploads/${p.image}" style="width:100%;height:150px;object-fit:cover;border-radius:8px" onerror="this.src='/photo/plastinka-audio.png'">
-                <h3>${escapeHtml(p.name)}</h3>
-                <p>${escapeHtml(p.artist)}</p>
-                <p style="color:#ff7a2f;font-size:20px">$${p.price}</p>
-                <form action="/add-to-cart" method="POST">
-                    <input type="hidden" name="id" value="product_${p.id}">
-                    <button type="submit" style="background:#ff0000;border:none;padding:8px 20px;border-radius:20px;color:#fff;cursor:pointer">В корзину</button>
-                </form>
-            </div>
-        `;
+    for (let i = 1; i <= 5; i++) {
+        if (i <= fullStars) {
+            starsHtml += '<i class="fas fa-star star filled"></i>';
+        } else if (i === fullStars + 1 && hasHalfStar) {
+            starsHtml += '<i class="fas fa-star-half-alt star filled"></i>';
+        } else {
+            starsHtml += '<i class="far fa-star star"></i>';
+        }
     }
     
-    res.send(`
-<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Plastinka</title>
+    return `<div class="rating-stars">${starsHtml}<span class="rating-value">${rating}</span><span class="votes-count">(${votesCount})</span></div>`;
+}
+
+app.get("/", (req, res) => {
+    const user = req.session.user;
+    const showNotification = req.query.added === '1';
+    
+    try {
+        const setting = db.prepare("SELECT value FROM site_settings WHERE key = 'homepage_products'").get();
+        const homepageMode = setting ? setting.value : 'last_added';
+        
+        let productsQuery = "SELECT * FROM products";
+        switch(homepageMode) {
+            case 'popular':
+                productsQuery = "SELECT * FROM products ORDER BY id DESC LIMIT 6";
+                break;
+            case 'all':
+                productsQuery = "SELECT * FROM products LIMIT 12";
+                break;
+            default:
+                productsQuery = "SELECT * FROM products ORDER BY id DESC LIMIT 6";
+        }
+        
+        let products = db.prepare(productsQuery).all();
+        
+        for (const product of products) {
+            const rating = db.prepare(`SELECT AVG(rating) as avg_rating, COUNT(*) as votes_count FROM ratings WHERE product_id = ?`).get(product.id);
+            product.avg_rating = rating?.avg_rating ? parseFloat(rating.avg_rating).toFixed(1) : 0;
+            product.votes_count = rating?.votes_count || 0;
+        }
+        
+        const players = db.prepare("SELECT * FROM players").all();
+        
+        if (req.isMobile) {
+            let content = `
+                <h2 class="section-title">Новинки</h2>
+                <div class="products-grid">
+            `;
+            for (const product of products) {
+                content += `
+                    <div class="product-card" data-product-id="${product.id}" data-product-name="${escapeHtml(product.name)}" data-product-artist="${escapeHtml(product.artist)}" data-product-price="${product.price}" data-product-image="/uploads/${product.image}" data-product-description="${escapeHtml(product.description || 'Нет описания')}" data-product-genre="${escapeHtml(product.genre || 'Rock')}" data-product-year="${escapeHtml(product.year || '1970')}" data-product-audio="${product.audio || ''}">
+                        <div class="product-image">
+                            <img src="/uploads/${product.image}" alt="${escapeHtml(product.name)}">
+                            <div class="vinyl-overlay">
+                                <img src="/photo/plastinka-audio.png" class="vinyl-icon">
+                            </div>
+                        </div>
+                        <div class="product-info">
+                            <div class="product-name">${escapeHtml(product.name)}</div>
+                            <div class="product-artist">${escapeHtml(product.artist)}</div>
+                            <div class="rating-stars" data-product-id="${product.id}" data-rating="${product.avg_rating}">
+                                ${generateStarRatingHTML(product.avg_rating, product.votes_count)}
+                            </div>
+                            <div class="product-price">$${product.price}</div>
+                            <div class="product-actions">
+                                <button class="action-btn" onclick="event.stopPropagation(); addToCartMobile('product_${product.id}')">
+                                    <i class="fas fa-shopping-cart"></i>
+                                </button>
+                                <button class="action-btn" onclick="event.stopPropagation(); toggleFavoriteMobile('product_${product.id}')">
+                                    <i class="fas fa-heart"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+            content += `</div>`;
+            if (!user) content += `<div class="auth-prompt"><p>Войдите, чтобы добавлять товары в избранное и корзину</p><a href="/login" class="auth-btn">Войти</a></div>`;
+            
+            content += `
+                <div id="productModal" class="modal-overlay" style="display:none;">
+                    <div class="modal-content">
+                        <button class="modal-close" onclick="closeProductModal()">&times;</button>
+                        <img src="" alt="Пластинка" class="modal-player-image" id="productModalImage">
+                        <h2 class="modal-title" id="productModalTitle"></h2>
+                        <p class="modal-artist" id="productModalArtist"></p>
+                        <div class="modal-tags" id="productModalTags"></div>
+                        <div class="rating-section" id="modalRatingSection">
+                            <div class="rating-label">Средняя оценка:</div>
+                            <div class="rating-stars-large" id="modalRatingStars"></div>
+                            <div class="rating-votes" id="modalRatingVotes"></div>
+                        </div>
+                        <div class="comments-list" id="modalCommentsList"></div>
+                        <p class="modal-description" id="productModalDescription"></p>
+                        <div class="modal-price" id="productModalPrice"></div>
+                        <div class="modal-actions">
+                            <button onclick="addToCartFromModal()" class="modal-add-to-cart" style="flex:1;">В корзину</button>
+                            <button onclick="toggleFavoriteFromModal()" class="modal-fav-btn"><i class="fas fa-heart"></i></button>
+                        </div>
+                        <button onclick="openReviewModal()" class="modal-review-btn" id="modalReviewBtn">✍️ Оставить отзыв</button>
+                        <div id="productModalAudio" style="display:none;"></div>
+                        <button onclick="playModalPreview()" class="modal-play-btn" id="productModalPlayBtn" style="display:none;"><i class="fas fa-play"></i> Прослушать</button>
+                    </div>
+                </div>
+                <div id="reviewModal" class="modal-overlay" style="display:none;">
+                    <div class="modal-content review-modal-content">
+                        <button class="modal-close" onclick="closeReviewModal()">&times;</button>
+                        <h3 class="review-title">⭐ Оцените пластинку</h3>
+                        <div class="review-stars" id="reviewStars">
+                            <i class="far fa-star" data-rating="1"></i>
+                            <i class="far fa-star" data-rating="2"></i>
+                            <i class="far fa-star" data-rating="3"></i>
+                            <i class="far fa-star" data-rating="4"></i>
+                            <i class="far fa-star" data-rating="5"></i>
+                        </div>
+                        <textarea id="reviewComment" placeholder="Напишите ваш отзыв (необязательно)..." rows="4"></textarea>
+                        <button onclick="submitReview()" class="submit-review-btn">Отправить отзыв</button>
+                        <p id="reviewAuthMessage" style="display:none; color:#ff7a2f; margin-top:12px;">🔒 <a href="/login" style="color:#ff7a2f;">Войдите в аккаунт</a>, чтобы оставить отзыв</p>
+                    </div>
+                </div>
+                
+                <script>
+                let currentModalProductId = null;
+                let currentModalProductRealId = null;
+                let currentSelectedRating = null;
+                
+                function closeProductModal() {
+                    document.getElementById('productModal').style.display = 'none';
+                    document.getElementById('modalCommentSection').style.display = 'none';
+                }
+                
+                function openReviewModal() {
+                    const isLoggedIn = ${!!req.session.user};
+                    if (!isLoggedIn) {
+                        document.getElementById('reviewAuthMessage').style.display = 'block';
+                        return;
+                    }
+                    document.getElementById('reviewModal').style.display = 'flex';
+                }
+                
+                function closeReviewModal() {
+                    document.getElementById('reviewModal').style.display = 'none';
+                    document.getElementById('reviewComment').value = '';
+                    document.querySelectorAll('#reviewStars i').forEach(star => {
+                        star.className = 'far fa-star';
+                    });
+                }
+                
+                document.querySelectorAll('#reviewStars i').forEach(star => {
+                    star.addEventListener('click', function() {
+                        const rating = this.dataset.rating;
+                        document.querySelectorAll('#reviewStars i').forEach((s, idx) => {
+                            if (idx < rating) {
+                                s.className = 'fas fa-star';
+                            } else {
+                                s.className = 'far fa-star';
+                            }
+                        });
+                        window.selectedReviewRating = rating;
+                    });
+                });
+                
+                async function submitReview() {
+                    const isLoggedIn = ${!!req.session.user};
+                    if (!isLoggedIn) {
+                        alert('Войдите в аккаунт, чтобы оставить отзыв');
+                        return;
+                    }
+                    
+                    const rating = window.selectedReviewRating;
+                    const comment = document.getElementById('reviewComment').value;
+                    const productId = currentModalProductRealId;
+                    
+                    if (!rating) {
+                        alert('Выберите оценку');
+                        return;
+                    }
+                    
+                    const response = await fetch('/api/rating/' + productId, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rating: parseInt(rating), comment: comment || '' })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        alert('Спасибо за отзыв!');
+                        closeReviewModal();
+                        // Обновляем звезды в модалке
+                        const starsContainer = document.getElementById('modalRatingStars');
+                        if (starsContainer && data.avg_rating) {
+                            renderStarsInModalMobile('modalRatingStars', parseFloat(data.avg_rating), productId);
+                            document.getElementById('modalRatingVotes').textContent = '(' + data.votes_count + ' оценок)';
+                        }
+                        // Обновляем комментарии
+                        if (data.comments) {
+                            renderCommentsMobile(data.comments, 'modalCommentsList');
+                        }
+                        // Обновляем звезды на карточке товара
+                        const cardStars = document.querySelector('.rating-stars[data-product-id="' + productId + '"]');
+                        if (cardStars && data.avg_rating) {
+                            updateCardRatingMobile(cardStars, parseFloat(data.avg_rating), data.votes_count);
+                        }
+                    } else {
+                        alert('Ошибка при сохранении оценки');
+                    }
+                }
+                
+                function renderStarsInModalMobile(containerId, rating, productId) {
+                    const container = document.getElementById(containerId);
+                    if (!container) return;
+                    
+                    let starsHtml = '';
+                    const fullStars = Math.floor(rating);
+                    const hasHalfStar = rating % 1 >= 0.5;
+                    
+                    for (let i = 1; i <= 5; i++) {
+                        if (i <= fullStars) {
+                            starsHtml += '<i class="fas fa-star star filled" data-value="' + i + '"></i>';
+                        } else if (i === fullStars + 1 && hasHalfStar) {
+                            starsHtml += '<i class="fas fa-star-half-alt star filled" data-value="' + i + '"></i>';
+                        } else {
+                            starsHtml += '<i class="far fa-star star" data-value="' + i + '"></i>';
+                        }
+                    }
+                    container.innerHTML = starsHtml;
+                }
+                
+                function renderCommentsMobile(comments, containerId) {
+                    const container = document.getElementById(containerId);
+                    if (!container) return;
+                    
+                    if (!comments || comments.length === 0) {
+                        container.innerHTML = '<div class="no-comments">📝 Пока нет комментариев. Будьте первым!</div>';
+                        return;
+                    }
+                    
+                    let html = '';
+                    for (let i = 0; i < comments.length; i++) {
+                        const c = comments[i];
+                        let stars = '';
+                        for (let s = 1; s <= 5; s++) {
+                            if (s <= c.rating) {
+                                stars += '<i class="fas fa-star" style="color:#ff7a2f; font-size:10px;"></i>';
+                            } else {
+                                stars += '<i class="far fa-star" style="color:#555; font-size:10px;"></i>';
+                            }
+                        }
+                        html += '<div class="comment-item">' +
+                            '<div class="comment-header">' +
+                            '<span class="comment-user">' + escapeHtml(c.username) + '</span>' +
+                            '<span class="comment-date">' + new Date(c.created_at).toLocaleDateString() + '</span>' +
+                            '</div>' +
+                            '<div><span class="comment-rating">' + stars + '</span></div>' +
+                            '<div class="comment-text">' + escapeHtml(c.comment) + '</div>' +
+                            '</div>';
+                    }
+                    container.innerHTML = html;
+                }
+                
+                function updateCardRatingMobile(container, rating, votesCount) {
+                    let starsHtml = '';
+                    const fullStars = Math.floor(rating);
+                    const hasHalfStar = rating % 1 >= 0.5;
+                    for (let i = 1; i <= 5; i++) {
+                        if (i <= fullStars) {
+                            starsHtml += '<i class="fas fa-star star filled"></i>';
+                        } else if (i === fullStars + 1 && hasHalfStar) {
+                            starsHtml += '<i class="fas fa-star-half-alt star filled"></i>';
+                        } else {
+                            starsHtml += '<i class="far fa-star star"></i>';
+                        }
+                    }
+                    starsHtml += '<span class="rating-value">' + rating + '</span>';
+                    starsHtml += '<span class="votes-count">(' + votesCount + ')</span>';
+                    container.innerHTML = starsHtml;
+                    container.dataset.rating = rating;
+                }
+                
+                document.querySelectorAll('.product-card').forEach(card => {
+                    card.addEventListener('click', (e) => {
+                        if (e.target.closest('.action-btn')) return;
+                        currentModalProductRealId = card.dataset.productId;
+                        currentModalProductId = 'product_' + card.dataset.productId;
+                        document.getElementById('productModalImage').src = card.dataset.productImage;
+                        document.getElementById('productModalTitle').textContent = card.dataset.productName;
+                        document.getElementById('productModalArtist').textContent = card.dataset.productArtist;
+                        document.getElementById('productModalTags').innerHTML = '<span class="modal-tag">' + card.dataset.productGenre + '</span><span class="modal-tag">' + card.dataset.productYear + '</span>';
+                        document.getElementById('productModalDescription').textContent = card.dataset.productDescription;
+                        document.getElementById('productModalPrice').innerHTML = card.dataset.productPrice + ' <span>$</span>';
+                        
+                        if (card.dataset.productAudio && card.dataset.productAudio !== '') {
+                            document.getElementById('productModalPlayBtn').style.display = 'flex';
+                        } else {
+                            document.getElementById('productModalPlayBtn').style.display = 'none';
+                        }
+                        
+                        fetch('/api/rating/' + card.dataset.productId)
+                            .then(r => r.json())
+                            .then(data => {
+                                renderStarsInModalMobile('modalRatingStars', parseFloat(data.avg_rating), card.dataset.productId);
+                                document.getElementById('modalRatingVotes').textContent = '(' + data.votes_count + ' оценок)';
+                                renderCommentsMobile(data.comments, 'modalCommentsList');
+                            });
+                        
+                        fetch('/api/favorites/check/' + currentModalProductId)
+                            .then(r => r.json())
+                            .then(data => {
+                                const favBtn = document.querySelector('#productModal .modal-fav-btn');
+                                if (data.isFavorite) {
+                                    favBtn.style.color = '#ff0000';
+                                    favBtn.style.background = 'rgba(255, 0, 0, 0.2)';
+                                } else {
+                                    favBtn.style.color = '#fff';
+                                    favBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+                                }
+                            });
+                        
+                        document.getElementById('productModal').style.display = 'flex';
+                    });
+                });
+                
+                function addToCartFromModal() {
+                    if (currentModalProductId) {
+                        fetch('/api/cart/add', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: currentModalProductId })
+                        }).then(() => {
+                            showToastMobile('Товар добавлен в корзину', false);
+                            closeProductModal();
+                        });
+                    }
+                }
+                
+                function toggleFavoriteFromModal() {
+                    if (currentModalProductId) {
+                        fetch('/api/favorites/toggle', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: currentModalProductId })
+                        }).then(() => {
+                            const favBtn = document.querySelector('#productModal .modal-fav-btn');
+                            if (favBtn.style.color === 'rgb(255, 0, 0)') {
+                                favBtn.style.color = '#fff';
+                                favBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+                                showToastMobile('Удалено из избранного', false);
+                            } else {
+                                favBtn.style.color = '#ff0000';
+                                favBtn.style.background = 'rgba(255, 0, 0, 0.2)';
+                                showToastMobile('Добавлено в избранное', false);
+                            }
+                        });
+                    }
+                }
+                
+                function playModalPreview() {
+                    const audioFile = currentModalProductRealId;
+                    if (audioFile) {
+                        const audio = new Audio('/audio/' + audioFile);
+                        audio.play();
+                    }
+                }
+                
+                function showToastMobile(message, isError) {
+                    const toast = document.createElement('div');
+                    toast.className = 'toast-notification';
+                    toast.innerHTML = '<div style="display:flex;align-items:center;gap:8px">' + 
+                        '<span>' + (isError ? '❌' : '✅') + '</span>' + 
+                        '<span>' + message + '</span>' + 
+                        '</div>';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 3000);
+                }
+                
+                function escapeHtml(str) {
+                    if (!str) return '';
+                    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                }
+                </script>
+            `;
+            res.send(renderMobilePage('Главная', content, user, 'home', showNotification));
+        } else {
+            let productHTML = "";
+            for (const product of products) {
+                productHTML += `
+<div class="benefit" 
+     data-product-id="${product.id}"
+     data-product-name="${escapeHtml(product.name)}"
+     data-product-artist="${escapeHtml(product.artist)}"
+     data-product-price="${product.price}"
+     data-product-image="/uploads/${product.image}"
+     data-product-description="${escapeHtml(product.description || 'Нет описания')}"
+     data-product-genre="${escapeHtml(product.genre || 'Rock')}"
+     data-product-year="${escapeHtml(product.year || '1970')}">
+    <div class="image-container">
+        <img src="/uploads/${product.image}" class="graf">
+        <img src="/photo/plastinka-audio.png" class="plastinka">
+        ${product.audio ? `<audio class="album-audio" src="/audio/${product.audio}" preload="auto"></audio>` : ""}
+    </div>
+    <div class="benefit-info">
+        <div class="album-nazv-container">
+            <span class="album-nazv">${escapeHtml(product.name)}</span>
+        </div>
+        <div class="album-title-container">
+            <span class="album-title">${escapeHtml(product.artist)}</span>
+        </div>
+        <div class="rating-stars" data-product-id="${product.id}" data-rating="${product.avg_rating}">
+            ${generateStarRatingHTML(product.avg_rating, product.votes_count)}
+        </div>
+        <div class="album-bottom">
+            <span class="album-price">${product.price}$</span>
+            <form action="/add-to-cart" method="POST" class="add-to-cart-form">
+                <input type="hidden" name="id" value="product_${product.id}">
+                <button type="submit" class="add-to-cart">
+                    <img src="/photo/b_plus.svg" class="cart-icon">
+                </button>
+            </form>
+        </div>
+    </div>
+</div>`;
+            }
+
+            let carouselItems = "";
+            for (let i = 0; i < 20; i++) {
+                for (const player of players) {
+                    carouselItems += `
+                        <div class="card" 
+                             data-player-id="${player.id}"
+                             data-name="${escapeHtml(player.name)}"
+                             data-price="${player.price}"
+                             data-image="/photo/${player.image}"
+                             data-description="${escapeHtml(player.description || 'Высококачественный проигрыватель винила')}">
+                            <div class="circle orange"></div>
+                            <img src="/photo/${player.image}" alt="${player.name}" class="player-image">
+                            <button class="view-btn">Смотреть</button>
+                        </div>`;
+                }
+            }
+
+            res.send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plastinka</title>
+<link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}body{background:#0f0f0f;color:#fff;font-family:Arial,sans-serif}
-header{position:sticky;top:0;background:#0a0a0a;padding:15px 5%;display:flex;justify-content:space-between;align-items:center}
-.logo img{height:50px}
-.right-icons{display:flex;gap:20px}
-.right-icons a{color:#fff;text-decoration:none}
-.right-icons img{height:40px}
-.hero{height:300px;background:linear-gradient(45deg,#ff0000,#990000);display:flex;align-items:center;justify-content:center}
-.hero h1{font-size:48px}
-.products{max-width:1200px;margin:40px auto;padding:0 20px}
-.products h2{margin-bottom:20px}
-.products-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:20px}
-.btn-primary{display:inline-block;background:#ff0000;color:#fff;padding:10px 20px;border-radius:5px;text-decoration:none}
+@import url('https://fonts.googleapis.com/css2?family=Rubik+Mono+One&display=swap');
+
+.rating-stars {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0;
+}
+.rating-stars .star {
+    font-size: 16px;
+    transition: all 0.2s ease;
+    color: #444;
+}
+.rating-stars .star.filled {
+    color: #ff7a2f;
+}
+.rating-stars .rating-value {
+    font-size: 12px;
+    color: #ff7a2f;
+    margin-left: 6px;
+    font-weight: bold;
+}
+.rating-stars .votes-count {
+    font-size: 10px;
+    color: #666;
+    margin-left: 4px;
+}
+
+.rating-stars-large {
+    display: inline-flex;
+    gap: 10px;
+    margin: 10px 0;
+}
+.rating-stars-large .star {
+    font-size: 28px;
+    transition: all 0.2s ease;
+    color: #444;
+}
+.rating-stars-large .star.filled {
+    color: #ff7a2f;
+}
+.rating-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 15px 0;
+    padding: 10px;
+    background: rgba(255,122,47,0.1);
+    border-radius: 12px;
+}
+.rating-label {
+    font-size: 14px;
+    color: #ff7a2f;
+    font-weight: bold;
+}
+.rating-votes {
+    font-size: 12px;
+    color: #888;
+}
+.comments-list {
+    margin: 15px 0;
+    padding: 10px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.comment-item {
+    padding: 10px;
+    border-bottom: 1px solid #333;
+    margin-bottom: 8px;
+}
+.comment-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    font-size: 12px;
+}
+.comment-user {
+    color: #ff7a2f;
+    font-weight: bold;
+}
+.comment-date {
+    color: #666;
+}
+.comment-rating {
+    color: #ff7a2f;
+    font-size: 12px;
+    margin-right: 10px;
+}
+.comment-text {
+    font-size: 13px;
+    color: #ccc;
+    line-height: 1.4;
+}
+.no-comments {
+    text-align: center;
+    color: #666;
+    padding: 10px;
+    font-size: 12px;
+}
+
+.notification {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, #4CAF50, #45a049);
+    color: white;
+    padding: 14px 20px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transform: translateX(400px);
+    animation: slideInRight 0.3s forwards, slideOutRight 0.3s 2.7s forwards;
+    border-left: 4px solid #fff;
+}
+@keyframes slideInRight {
+    to { transform: translateX(0); }
+}
+@keyframes slideOutRight {
+    to { transform: translateX(400px); }
+}
+
+@keyframes rotate {
+from { transform: rotate(0deg); }
+to { transform: rotate(360deg); }
+}
+.image-container { position: relative; cursor: pointer; aspect-ratio: 1; overflow: hidden; }
+.image-container .graf { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+.image-container .plastinka { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.3s ease; animation: rotate 5s linear infinite; animation-play-state: paused; }
+.image-container:hover .graf { transform: translateX(50%); }
+.image-container:hover .plastinka { opacity: 1; animation-play-state: running; }
+
+header {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 5%;
+    background: #0a0a0a;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    min-height: 80px;
+}
+
+.logo {
+    flex-shrink: 0;
+    width: auto;
+    z-index: 2;
+}
+.logo img {
+    height: 50px;
+    width: auto;
+    display: block;
+}
+
+.search-bar-desktop {
+    position: absolute;
+    left: 40%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 500px;
+    min-width: 250px;
+    background: #1a1a1a;
+    border-radius: 40px;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid #333;
+    transition: border-color 0.2s;
+    z-index: 1;
+}
+
+.search-bar-desktop:hover,
+.search-bar-desktop:focus-within {
+    border-color: #ff0000;
+    background: #111;
+}
+
+.search-bar-desktop i {
+    color: #ff0000;
+    font-size: 18px;
+}
+
+.search-bar-desktop input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 16px;
+    outline: none;
+}
+
+.search-bar-desktop input::placeholder {
+    color: #888;
+}
+
+.search-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 0;
+    right: 0;
+    background: #1a1a1a;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    z-index: 1000;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #333;
+}
+
+.search-dropdown.show {
+    display: block;
+}
+
+.search-result-item-dropdown {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-bottom: 1px solid #333;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.search-result-item-dropdown:hover {
+    background: #252525;
+}
+
+.search-result-image {
+    width: 50px;
+    height: 50px;
+    object-fit: cover;
+    border-radius: 8px;
+}
+
+.search-result-info {
+    flex: 1;
+}
+
+.search-result-name {
+    font-weight: bold;
+    font-size: 14px;
+    color: white;
+}
+
+.search-result-artist {
+    font-size: 12px;
+    color: #888;
+}
+
+.search-result-price {
+    color: #ff0000;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.search-result-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.search-cart-btn, .search-detail-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.search-cart-btn {
+    background: linear-gradient(45deg, #ff0000, #990000);
+    color: white;
+}
+
+.search-detail-btn {
+    background: #333;
+    color: white;
+}
+
+.search-cart-btn:hover, .search-detail-btn:hover {
+    transform: translateY(-1px);
+    opacity: 0.9;
+}
+
+.search-no-results {
+    padding: 20px;
+    text-align: center;
+    color: #888;
+}
+
+.search-catalog-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(45deg, #ff0000, #640000);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    text-align: center;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    transition: all 0.2s;
+}
+
+.search-catalog-btn:hover {
+    background: linear-gradient(45deg, #670000, #c80000);
+    transform: translateY(-2px);
+}
+
+.right-icons {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: auto;
+    z-index: 2;
+}
+
+.right-icons a {
+    display: flex;
+    align-items: center;
+    transition: all 0.25s ease;
+    line-height: 0;
+}
+
+.right-icons a:hover {
+    transform: scale(1.1);
+    filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.5));
+}
+
+.right-icons img {
+    height: 40px;
+    width: auto;
+    display: block;
+}
+
+@media (max-width: 700px) {
+    header { padding: 10px 4%; }
+    .logo img { height: 40px; }
+    .search-bar-desktop { max-width: 350px; }
+    .right-icons { gap: 15px; }
+    .right-icons img { height: 36px; }
+}
+@media (max-width: 550px) {
+    header { justify-content: center; }
+    .search-bar-desktop { flex: 1 1 100%; max-width: 100%; order: 1; margin: 5px 0; }
+    .right-icons { justify-content: center; }
+}
+@media (max-width: 480px) {
+    .logo img { height: 36px; }
+    .right-icons img { height: 34px; }
+    .right-icons { gap: 12px; }
+}
+
+.player-carousel, .player-carousel2 { width: 100%; overflow: hidden; background: #1e1e1e; padding: 60px 0; position: relative; }
+.player-carousel .carousel-track { display: flex; gap: 40px; width: max-content; animation: scrollLeft 60s linear infinite; will-change: transform; align-items: center; }
+.player-carousel2 .carousel-track2 { display: flex; gap: 40px; width: max-content; animation: scrollRight 60s linear infinite; will-change: transform; align-items: center; }
+.player-carousel:hover .carousel-track, .player-carousel2:hover .carousel-track2 { animation-play-state: paused; }
+@keyframes scrollLeft { 0% { transform: translateX(0); } 100% { transform: translateX(calc(-50%)); } }
+@keyframes scrollRight { 0% { transform: translateX(-50%); } 100% { transform: translateX(0); } }
+.player-carousel .card, .player-carousel2 .card { position: relative; width: 280px; height: 350px; background: transparent; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.3s ease; cursor: pointer; }
+.player-carousel .card:hover, .player-carousel2 .card:hover { transform: translateY(-10px); z-index: 10; }
+.player-carousel .circle, .player-carousel2 .circle { position: absolute; width: 260px; height: 260px; border-radius: 50%; transition: transform 0.4s ease; }
+.player-carousel .card:hover .circle, .player-carousel2 .card:hover .circle { transform: scale(1.1); }
+.player-carousel .orange, .player-carousel2 .orange { background: #ff7a2f; }
+.player-carousel .player-image, .player-carousel2 .player-image { position: relative; width: 240px; height: auto; z-index: 2; pointer-events: none; object-fit: contain; transition: transform 0.3s ease; }
+.player-carousel .view-btn, .player-carousel2 .view-btn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: linear-gradient(45deg, #D74307, #ff6b2b); color: white; border: none; border-radius: 30px; padding: 10px 25px; font-size: 14px; font-weight: bold; cursor: pointer; opacity: 0; visibility: hidden; transition: all 0.3s ease; z-index: 10; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 5px 15px rgba(215, 67, 7, 0.3); white-space: nowrap; }
+.player-carousel .card:hover .view-btn, .player-carousel2 .card:hover .view-btn { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+.player-carousel::before, .player-carousel::after, .player-carousel2::before, .player-carousel2::after { content: ''; position: absolute; top: 0; width: 150px; height: 100%; z-index: 10; pointer-events: none; }
+.player-carousel::before, .player-carousel2::before { left: 0; background: linear-gradient(90deg, #1e1e1e 0%, transparent 100%); }
+.player-carousel::after, .player-carousel2::after { right: 0; background: linear-gradient(-90deg, #1e1e1e 0%, transparent 100%); }
+
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(5px); z-index: 1000; justify-content: center; align-items: center; }
+.modal-overlay.active { display: flex; }
+.modal-content { background: linear-gradient(145deg, #2a2a2a, #1e1e1e); border-radius: 20px; padding: 30px; max-width: 380px; width: 90%; position: relative; border: 1px solid #ff7a2f; box-shadow: 0 20px 40px rgba(255, 122, 47, 0.2); animation: modalAppear 0.3s ease; max-height: 85vh; overflow-y: auto; }
+.modal-content::-webkit-scrollbar { width: 6px; }
+.modal-content::-webkit-scrollbar-track { background: #1a1a1a; border-radius: 10px; }
+.modal-content::-webkit-scrollbar-thumb { background: #ff7a2f; border-radius: 10px; }
+.modal-content::-webkit-scrollbar-thumb:hover { background: #ff0000; }
+@keyframes modalAppear { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+.modal-close { position: absolute; top: 15px; right: 15px; background: none; border: none; color: #fff; font-size: 30px; cursor: pointer; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255, 0, 0, 0.1); transition: 0.3s; }
+.modal-close:hover { background: #ff0000; transform: rotate(90deg); }
+.modal-player-image { width: 100%; max-height: 300px; object-fit: contain; margin-bottom: 20px; border-radius: 12px; }
+.modal-title { font-size: 24px; color: #ff7a2f; margin-bottom: 10px; font-weight: bold; }
+.modal-description { color: #ccc; line-height: 1.6; margin-bottom: 20px; font-size: 14px; }
+.modal-price { font-size: 28px; color: #fff; font-weight: bold; margin-bottom: 25px; }
+.modal-price span { color: #ff7a2f; font-size: 18px; }
+.modal-add-to-cart { width: 100%; padding: 12px; background: linear-gradient(45deg, #ff7a2f, #ff0000); border: none; border-radius: 10px; color: white; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+
+.catalog-title a { color: inherit; text-decoration: none; transition: 0.3s; }
+.catalog-title a:hover { color: #ff0000; }
+
+.modal-artist { color: #aaa; font-size: 16px; margin-bottom: 15px; }
+.modal-tags { display: flex; gap: 10px; margin-bottom: 20px; }
+.modal-tag { background: rgba(255, 122, 47, 0.2); padding: 5px 12px; border-radius: 20px; font-size: 12px; color: #ff7a2f; }
+.modal-actions { display: flex; gap: 15px; margin-bottom: 15px; }
+.modal-fav-btn { width: 50px; background: rgba(255, 255, 255, 0.1); border: 1px solid #ff0000; border-radius: 10px; color: #ff0000; font-size: 20px; cursor: pointer; transition: 0.3s; }
+.modal-fav-btn:hover { background: #ff0000; color: white; }
+.modal-play-btn { width: 100%; padding: 10px; background: rgba(255, 255, 255, 0.1); border: 1px solid #ff7a2f; border-radius: 10px; color: #ff7a2f; font-size: 14px; cursor: pointer; transition: 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.benefit { cursor: pointer; }
+.modal-review-btn { width: 100%; margin: 10px 0; padding: 10px; background: rgba(255,122,47,0.2); border: 1px solid #ff7a2f; border-radius: 10px; color: #ff7a2f; font-size: 14px; cursor: pointer; transition: 0.3s; }
+
+@media (max-width: 768px) {
+    .player-carousel .card, .player-carousel2 .card { width: 220px; height: 280px; }
+    .player-carousel .circle, .player-carousel2 .circle { width: 200px; height: 200px; }
+    .player-carousel .player-image, .player-carousel2 .player-image { width: 180px; }
+    .player-carousel .carousel-track, .player-carousel2 .carousel-track2 { gap: 30px; }
+    .player-carousel::before, .player-carousel::after, .player-carousel2::before, .player-carousel2::after { width: 80px; }
+    .modal-content { padding: 20px; }
+    .modal-title { font-size: 22px; }
+    .modal-price { font-size: 24px; }
+    .rating-stars-large .star { font-size: 22px; }
+}
+@media (max-width: 480px) {
+    .player-carousel .card, .player-carousel2 .card { width: 180px; height: 230px; }
+    .player-carousel .circle, .player-carousel2 .circle { width: 160px; height: 160px; }
+    .player-carousel .player-image, .player-carousel2 .player-image { width: 140px; }
+    .player-carousel .carousel-track, .player-carousel2 .carousel-track2 { gap: 20px; }
+    .player-carousel .view-btn, .player-carousel2 .view-btn { padding: 6px 15px; font-size: 12px; bottom: 10px; }
+    .player-carousel::before, .player-carousel::after, .player-carousel2::before, .player-carousel2::after { width: 50px; }
+}
 </style>
 </head>
 <body>
 <header>
-    <div class="logo"><a href="/"><img src="/photo/logo.svg"></a></div>
+    <div class="logo"><a href="/"><img src="/photo/logo.svg" alt="Plastinka"></a></div>
+    <div class="search-bar-desktop" style="position: relative;">
+        <i class="fas fa-search"></i>
+        <input type="text" id="desktop-search-input" placeholder="Поиск пластинок..." autocomplete="off">
+        <div id="search-dropdown" class="search-dropdown"></div>
+    </div>
     <div class="right-icons">
-        <a href="/catalog"><img src="/photo/icon-katalog.png"></a>
-        <a href="/profile"><img src="/photo/profile_icon.png"></a>
-        <a href="/cart"><img src="/photo/knopka-korzina.svg"></a>
+        <a href="/catalog" class="catalog-btn">
+            <img src="/photo/icon-katalog.png" alt="Каталог">
+        </a>
+        <a href="/profile" class="profile-btn">
+            <img src="/photo/profile_icon.png" alt="Профиль">
+        </a>
+        <a href="/cart" class="cart-btn">
+            <img src="/photo/knopka-korzina.svg" alt="Корзина">
+        </a>
     </div>
 </header>
-<div class="hero">
-    <h1>Plastinka</h1>
-</div>
-<div class="products">
-    <h2>Новинки</h2>
-    <div class="products-grid">${productsHtml || '<p>Товаров пока нет</p>'}</div>
-    <div style="text-align:center;margin-top:30px">
-        <a href="/catalog" class="btn-primary">Смотреть весь каталог →</a>
-    </div>
-</div>
-</body></html>
-    `);
+<section class="hero"></section>
+<section class="catalog-title-section"><h2 class="catalog-title"><a href="/catalog">КАТАЛОГ</a></h2></section>
+<section class="benefits"><div class="benefits-grid">${productHTML || '<p style="text-align: center; color: #aaa; grid-column: 1/-1;">Товаров пока нет</p>'}</div></section>
+<section class="catalog-title-section"><h2 class="catalog-title">ПРОИГРЫВАТЕЛИ</h2></section>
+<section class="player-carousel"><div class="carousel-track">${carouselItems || '<p style="color: white; padding: 20px;">Проигрывателей пока нет</p>'}</div></section>
+<section class="player-carousel2"><div class="carousel-track2">${carouselItems || '<p style="color: white; padding: 20px;">Проигрывателей пока нет</p>'}</div></section>
+<div class="modal-overlay" id="playerModal"><div class="modal-content"><button class="modal-close" id="closeModal">&times;</button><img src="" alt="Проигрыватель" class="modal-player-image" id="modalImage"><h2 class="modal-title" id="modalTitle"></h2><p class="modal-description" id="modalDescription"></p><div class="modal-price" id="modalPrice"></div><form id="addToCartForm" method="POST" action="/add-to-cart"><input type="hidden" name="id" id="modalProductId" value=""><button type="submit" class="modal-add-to-cart" id="modalAddToCart">Добавить в корзину</button></form></div></div>
+<div class="modal-overlay" id="productModalDesktop"><div class="modal-content"><button class="modal-close" id="closeProductModalDesktop">&times;</button><img src="" alt="Пластинка" class="modal-player-image" id="productModalImageDesktop"><h2 class="modal-title" id="productModalTitleDesktop"></h2><p class="modal-artist" id="productModalArtistDesktop"></p><div class="modal-tags" id="productModalTagsDesktop"></div><div class="rating-section" id="modalRatingSectionDesktop"><div class="rating-label">Средняя оценка:</div><div class="rating-stars-large" id="modalRatingStarsDesktop"></div><div class="rating-votes" id="modalRatingVotesDesktop"></div></div><div class="comment-section" id="modalCommentSectionDesktop" style="display:none;"><textarea id="modalCommentDesktop" placeholder="Напишите свой отзыв..." rows="3" style="width:100%; background:#111; border:1px solid #333; color:white; border-radius:8px; padding:10px; margin:10px 0;"></textarea><button onclick="submitRatingWithCommentDesktop()" class="submit-rating-btn" style="background:linear-gradient(45deg,#ff7a2f,#ff0000); border:none; color:white; padding:8px 16px; border-radius:8px; cursor:pointer;">Отправить оценку</button></div><div class="comments-list" id="modalCommentsListDesktop"></div><p class="modal-description" id="productModalDescriptionDesktop"></p><div class="modal-price" id="productModalPriceDesktop"></div><div class="modal-actions"><button onclick="addToCartFromModalDesktop()" class="modal-add-to-cart" style="flex:1;" id="productModalAddToCartDesktop"><i class="fas fa-shopping-cart"></i> В корзину</button><button onclick="toggleFavoriteFromModalDesktop()" class="modal-fav-btn" id="productModalFavBtnDesktop"><i class="fas fa-heart"></i></button></div><div id="productModalAudioDesktop" style="display:none;"></div><button onclick="playModalPreviewDesktop()" class="modal-play-btn" id="productModalPlayBtnDesktop" style="display:none;"><i class="fas fa-play"></i> Прослушать</button></div></div>
+<section class="kurt"><div class="red-block"></div><div class="image-block left"><img src="/photo/left.png" alt="left"></div><div class="image-block right"><img src="/photo/right.png" alt="right"></div></section>
+<section class="catalog-title-section2"><h3 class="catalog-title2">Для тех, для кого музыка <br> стала жизнью</h3></section>
+<section class="music-section"><img src="/photo/figura.svg" class="figura" alt="figura"><div class="images-container"><img src="/photo/image 6.png" class="image" alt="image1"><img src="/photo/image 2.png" class="image" alt="image2"><img src="/photo/image 3.png" class="image" alt="image3"><img src="/photo/image 4.png" class="image" alt="image4"><img src="/photo/image 5.png" class="image" alt="image5"><img src="/photo/image 6.png" class="image" alt="image6"></div></section>
+<footer><img src="/photo/logo-2.svg" class="footer-logo" alt="Plastinka"></footer>
+
+<script>
+let currentPlayingAudio = null;
+let currentPlayingPlastinka = null;
+let currentProductId = null;
+let searchTimeout = null;
+let currentModalProductId = null;
+let currentSelectedRating = null;
+
+function showToast(message, isError) {
+    const toast = document.createElement('div');
+    toast.className = 'notification';
+    toast.innerHTML = '<div class="notification-icon">' + (isError ? '❌' : '✅') + '</div>' +
+        '<div class="notification-content">' +
+        '<span class="notification-title">' + (isError ? 'Ошибка' : 'Успешно') + '</span>' +
+        '<span class="notification-message">' + message + '</span>' +
+        '</div><div class="notification-progress"></div>';
+    document.body.appendChild(toast);
+    setTimeout(function() { if (toast && toast.remove) toast.remove(); }, 3000);
+}
+
+function renderComments(comments, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!comments || comments.length === 0) {
+        container.innerHTML = '<div class="no-comments">📝 Пока нет комментариев. Будьте первым!</div>';
+        return;
+    }
+    let html = '';
+    for (var i = 0; i < comments.length; i++) {
+        var c = comments[i];
+        var stars = '';
+        for (var s = 1; s <= 5; s++) {
+            if (s <= c.rating) stars += '<i class="fas fa-star" style="color:#ff7a2f; font-size:10px;"></i>';
+            else stars += '<i class="far fa-star" style="color:#555; font-size:10px;"></i>';
+        }
+        html += '<div class="comment-item"><div class="comment-header"><span class="comment-user">' + escapeHtml(c.username) + '</span><span class="comment-date">' + new Date(c.created_at).toLocaleDateString() + '</span></div><div><span class="comment-rating">' + stars + '</span></div><div class="comment-text">' + escapeHtml(c.comment) + '</div></div>';
+    }
+    container.innerHTML = html;
+}
+
+function renderStarsInModal(containerId, rating, productId, isLarge) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    let starsHtml = '';
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 >= 0.5;
+    for (let i = 1; i <= 5; i++) {
+        if (i <= fullStars) starsHtml += '<i class="fas fa-star star filled" data-value="' + i + '"></i>';
+        else if (i === fullStars + 1 && hasHalfStar) starsHtml += '<i class="fas fa-star-half-alt star filled" data-value="' + i + '"></i>';
+        else starsHtml += '<i class="far fa-star star" data-value="' + i + '"></i>';
+    }
+    container.innerHTML = starsHtml;
+    const isLoggedIn = ${!!req.session.user};
+    if (isLoggedIn) {
+        const stars = container.querySelectorAll('.star');
+        for (var j = 0; j < stars.length; j++) {
+            var star = stars[j];
+            star.style.cursor = 'pointer';
+            star.addEventListener('mouseenter', function() {
+                var value = parseInt(this.dataset.value);
+                for (var k = 0; k < stars.length; k++) {
+                    if (k < value) stars[k].classList.add('hover');
+                    else stars[k].classList.remove('hover');
+                }
+            });
+            star.addEventListener('mouseleave', function() {
+                for (var k = 0; k < stars.length; k++) stars[k].classList.remove('hover');
+            });
+            star.addEventListener('click', function() {
+                var value = parseInt(this.dataset.value);
+                var commentSection = document.getElementById('modalCommentSectionDesktop');
+                if (commentSection) commentSection.style.display = 'block';
+                currentSelectedRating = value;
+                for (var k = 0; k < stars.length; k++) {
+                    if (k < value) stars[k].classList.add('filled');
+                    else stars[k].classList.remove('filled');
+                }
+            });
+        }
+    }
+}
+
+function updateCardRating(container, rating) {
+    var stars = container.querySelectorAll('.star');
+    var fullStars = Math.floor(rating);
+    var hasHalfStar = rating % 1 >= 0.5;
+    for (var i = 0; i < stars.length; i++) {
+        if (i < fullStars) stars[i].classList.add('filled');
+        else if (i === fullStars && hasHalfStar) stars[i].classList.add('filled');
+        else stars[i].classList.remove('filled');
+    }
+    var ratingValue = container.querySelector('.rating-value');
+    if (ratingValue) ratingValue.textContent = rating;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function openProductModal(id, name, artist, price, image, description, genre, year, audio) {
+    currentProductId = 'product_' + id;
+    currentModalProductId = id;
+    document.getElementById('productModalImageDesktop').src = image;
+    document.getElementById('productModalTitleDesktop').textContent = name;
+    document.getElementById('productModalArtistDesktop').textContent = artist;
+    document.getElementById('productModalTagsDesktop').innerHTML = '<span class="modal-tag">' + genre + '</span><span class="modal-tag">' + year + '</span>';
+    document.getElementById('productModalDescriptionDesktop').textContent = description;
+    document.getElementById('productModalPriceDesktop').innerHTML = price + ' <span>$</span>';
+    
+    fetch('/api/rating/' + id).then(function(response) { return response.json(); }).then(function(data) {
+        renderStarsInModal('modalRatingStarsDesktop', parseFloat(data.avg_rating), id, true);
+        var votesSpan = document.getElementById('modalRatingVotesDesktop');
+        if (votesSpan) votesSpan.textContent = '(' + data.votes_count + ' оценок)';
+        renderComments(data.comments, 'modalCommentsListDesktop');
+    });
+    
+    if (audio) {
+        document.getElementById('productModalAudioDesktop').innerHTML = audio;
+        document.getElementById('productModalPlayBtnDesktop').style.display = 'flex';
+    } else {
+        document.getElementById('productModalAudioDesktop').innerHTML = '';
+        document.getElementById('productModalPlayBtnDesktop').style.display = 'none';
+    }
+    
+    document.getElementById('modalCommentSectionDesktop').style.display = 'none';
+    document.getElementById('modalCommentDesktop').value = '';
+    currentSelectedRating = null;
+    document.getElementById('productModalDesktop').classList.add('active');
+    
+    var track = document.querySelector('.player-carousel .carousel-track');
+    var track2 = document.querySelector('.player-carousel2 .carousel-track2');
+    if (track) track.style.animationPlayState = 'paused';
+    if (track2) track2.style.animationPlayState = 'paused';
+    updateFavoriteStatusDesktop(id);
+}
+
+function openPlayerModal(id, name, price, image, description) {
+    document.getElementById('modalImage').src = image;
+    document.getElementById('modalTitle').textContent = name;
+    document.getElementById('modalDescription').textContent = description;
+    document.getElementById('modalPrice').innerHTML = price + ' <span>$</span>';
+    document.getElementById('modalProductId').value = 'player_' + id;
+    document.getElementById('playerModal').classList.add('active');
+    var track = document.querySelector('.player-carousel .carousel-track');
+    var track2 = document.querySelector('.player-carousel2 .carousel-track2');
+    if (track) track.style.animationPlayState = 'paused';
+    if (track2) track2.style.animationPlayState = 'paused';
+}
+
+function performSearch(query) {
+    var searchDropdown = document.getElementById('search-dropdown');
+    if (!searchDropdown) return;
+    if (query.length < 1) {
+        searchDropdown.innerHTML = '';
+        searchDropdown.classList.remove('show');
+        return;
+    }
+    searchDropdown.innerHTML = '<div class="search-no-results">🔍 Поиск...</div>';
+    searchDropdown.classList.add('show');
+    fetch('/api/search?q=' + encodeURIComponent(query)).then(function(response) { return response.json(); }).then(function(data) {
+        if (!data.results || data.results.length === 0) {
+            searchDropdown.innerHTML = '<div class="search-no-results">🔍 Ничего не найдено</div><button class="search-catalog-btn" onclick="window.location.href=\'/catalog\'">📀 Поиск в каталоге</button>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < data.results.length; i++) {
+            var item = data.results[i];
+            var imagePath = item.type === 'product' ? '/uploads/' + item.image : '/photo/' + item.image;
+            var productId = item.type + '_' + item.id;
+            html += '<div class="search-result-item-dropdown" data-type="' + item.type + '" data-id="' + item.id + '">' +
+                '<img src="' + imagePath + '" class="search-result-image" onerror="this.src=\'/photo/plastinka-audio.png\'">' +
+                '<div class="search-result-info"><div class="search-result-name">' + escapeHtml(String(item.name)) + '</div><div class="search-result-artist">' + escapeHtml(String(item.artist)) + '</div></div>' +
+                '<span class="search-result-price">$' + item.price + '</span>' +
+                '<div class="search-result-actions"><button class="search-cart-btn" data-id="' + productId + '">🛒</button><button class="search-detail-btn" data-id="' + item.id + '" data-type="' + item.type + '" data-name="' + escapeHtml(String(item.name)) + '" data-artist="' + escapeHtml(String(item.artist)) + '" data-price="' + item.price + '" data-image="' + imagePath + '" data-description="' + escapeHtml(String(item.description || 'Нет описания')) + '" data-genre="' + (item.genre || 'Rock') + '" data-year="' + (item.year || '1970') + '" data-audio="' + (item.audio || '') + '">📋</button></div>' +
+                '</div>';
+        }
+        html += '<button class="search-catalog-btn" onclick="window.location.href=\'/catalog\'">Поиск в каталоге →</button>';
+        searchDropdown.innerHTML = html;
+        
+        var cartBtns = searchDropdown.querySelectorAll('.search-cart-btn');
+        for (var j = 0; j < cartBtns.length; j++) {
+            cartBtns[j].addEventListener('click', function(e) {
+                e.stopPropagation();
+                var id = this.getAttribute('data-id');
+                fetch('/api/cart/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) }).then(function() { showToast('Товар добавлен в корзину', false); });
+            });
+        }
+        
+        var detailBtns = searchDropdown.querySelectorAll('.search-detail-btn');
+        for (var k = 0; k < detailBtns.length; k++) {
+            detailBtns[k].addEventListener('click', function(e) {
+                e.stopPropagation();
+                searchDropdown.classList.remove('show');
+                if (this.getAttribute('data-type') === 'product') {
+                    openProductModal(this.getAttribute('data-id'), this.getAttribute('data-name'), this.getAttribute('data-artist'), this.getAttribute('data-price'), this.getAttribute('data-image'), this.getAttribute('data-description'), this.getAttribute('data-genre'), this.getAttribute('data-year'), this.getAttribute('data-audio'));
+                } else {
+                    openPlayerModal(this.getAttribute('data-id'), this.getAttribute('data-name'), this.getAttribute('data-price'), this.getAttribute('data-image'), this.getAttribute('data-description'));
+                }
+            });
+        }
+        
+        var items = searchDropdown.querySelectorAll('.search-result-item-dropdown');
+        for (var m = 0; m < items.length; m++) {
+            items[m].addEventListener('click', function(e) {
+                if (e.target.tagName === 'BUTTON') return;
+                var detailBtn = this.querySelector('.search-detail-btn');
+                if (detailBtn) detailBtn.click();
+            });
+        }
+    }).catch(function(error) {
+        console.error('Ошибка:', error);
+        searchDropdown.innerHTML = '<div class="search-no-results">❌ Ошибка поиска</div><button class="search-catalog-btn" onclick="window.location.href=\'/catalog\'">📀 Поиск в каталоге</button>';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var searchInput = document.getElementById('desktop-search-input');
+    var searchDropdown = document.getElementById('search-dropdown');
+    if (searchInput) {
+        searchInput.addEventListener('input', function(e) {
+            var query = this.value;
+            if (searchTimeout) clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(function() { performSearch(query); }, 300);
+        });
+        searchInput.addEventListener('focus', function() { var query = this.value; if (query.length >= 1) performSearch(query); });
+        searchInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') { var query = encodeURIComponent(this.value); if (query) window.location.href = '/search-page?q=' + query; } });
+    }
+    document.addEventListener('click', function(e) { if (searchDropdown && !searchDropdown.contains(e.target) && e.target !== searchInput) { searchDropdown.classList.remove('show'); } });
+    
+    var ratingContainers = document.querySelectorAll('.rating-stars');
+    for (var r = 0; r < ratingContainers.length; r++) {
+        var container = ratingContainers[r];
+        var productId = container.dataset.productId;
+        fetch('/api/rating/' + productId).then(function(response) { return response.json(); }).then(function(data) {
+            if (data.avg_rating) {
+                updateCardRating(container, parseFloat(data.avg_rating));
+                var ratingValue = container.querySelector('.rating-value');
+                if (ratingValue) ratingValue.textContent = data.avg_rating;
+                var votesSpan = container.querySelector('.votes-count');
+                if (votesSpan) votesSpan.textContent = '(' + data.votes_count + ')';
+            }
+        });
+    }
+});
+
+document.querySelectorAll('.benefit').forEach(function(benefit) {
+    var imageContainer = benefit.querySelector('.image-container');
+    var audio = benefit.querySelector('.album-audio');
+    var plastinka = benefit.querySelector('.plastinka');
+    if (imageContainer && audio && plastinka) {
+        imageContainer.addEventListener('mouseenter', function(e) {
+            e.stopPropagation();
+            if (currentPlayingAudio && currentPlayingAudio !== audio) { currentPlayingAudio.pause(); currentPlayingAudio.currentTime = 0; if (currentPlayingPlastinka) currentPlayingPlastinka.style.animationPlayState = 'paused'; }
+            audio.currentTime = 0;
+            audio.play().catch(function(err) { console.log('Audio play error:', err); });
+            plastinka.style.animationPlayState = 'running';
+            currentPlayingAudio = audio;
+            currentPlayingPlastinka = plastinka;
+        });
+        imageContainer.addEventListener('mouseleave', function(e) {
+            e.stopPropagation();
+            audio.pause();
+            audio.currentTime = 0;
+            plastinka.style.animationPlayState = 'paused';
+            if (currentPlayingAudio === audio) { currentPlayingAudio = null; currentPlayingPlastinka = null; }
+        });
+    }
+    benefit.addEventListener('click', function(e) {
+        if (e.target.closest('.add-to-cart-form')) return;
+        openProductModal(this.dataset.productId, this.dataset.productName, this.dataset.productArtist, this.dataset.productPrice, this.dataset.productImage, this.dataset.productDescription, this.dataset.productGenre, this.dataset.productYear, '');
+    });
+});
+
+async function updateFavoriteStatusDesktop(productId) {
+    try {
+        const response = await fetch('/api/favorites/status/product_' + productId);
+        const data = await response.json();
+        const favBtn = document.getElementById('productModalFavBtnDesktop');
+        if (favBtn) {
+            if (data.isFavorite) {
+                favBtn.style.color = '#ff0000';
+                favBtn.style.background = 'rgba(255, 0, 0, 0.2)';
+                favBtn.style.border = '1px solid #ff0000';
+            } else {
+                favBtn.style.color = '#fff';
+                favBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+                favBtn.style.border = '1px solid #ff0000';
+            }
+        }
+    } catch (error) { console.error('Ошибка проверки статуса избранного:', error); }
+}
+
+function addToCartFromModalDesktop() { 
+    fetch('/api/cart/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: currentProductId }) }).then(function() { showToast('Товар добавлен в корзину', false); closeProductModalDesktop(); }); 
+}
+function toggleFavoriteFromModalDesktop() { 
+    const fullProductId = 'product_' + currentModalProductId;
+    fetch('/api/favorites/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: fullProductId }) }).then(function(response) { return response.json(); }).then(function(data) { 
+        if (data.success) {
+            const favBtn = document.getElementById('productModalFavBtnDesktop');
+            if (favBtn && favBtn.style.color === 'rgb(255, 0, 0)') { showToast('Удалено из избранного', false); }
+            else { showToast('Добавлено в избранное', false); }
+            if (currentModalProductId) { updateFavoriteStatusDesktop(currentModalProductId); }
+        }
+    }).catch(function(error) { console.error('Ошибка:', error); showToast('Ошибка при изменении избранного', true); }); 
+}
+
+function playModalPreviewDesktop() { 
+    var audioFile = document.getElementById('productModalAudioDesktop').innerText; 
+    if (audioFile) { var audio = new Audio('/audio/' + audioFile); audio.play(); } 
+}
+
+function closeProductModalDesktop() {
+    document.getElementById('productModalDesktop').classList.remove('active');
+    var track = document.querySelector('.player-carousel .carousel-track');
+    var track2 = document.querySelector('.player-carousel2 .carousel-track2');
+    if (track) track.style.animationPlayState = 'running';
+    if (track2) track2.style.animationPlayState = 'running';
+}
+
+function submitRatingWithCommentDesktop() {
+    var comment = document.getElementById('modalCommentDesktop').value;
+    var productId = currentModalProductId;
+    var rating = currentSelectedRating;
+    if (!rating) { showToast('⭐ Сначала выберите оценку!', true); return; }
+    fetch('/api/rating/' + productId, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rating: rating, comment: comment || '' }) })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (data.success) {
+            showToast('⭐ Спасибо за оценку и отзыв!', false);
+            renderStarsInModal('modalRatingStarsDesktop', parseFloat(data.avg_rating), productId, true);
+            var votesSpan = document.getElementById('modalRatingVotesDesktop');
+            if (votesSpan) votesSpan.textContent = '(' + data.votes_count + ' оценок)';
+            renderComments(data.comments, 'modalCommentsListDesktop');
+            document.getElementById('modalCommentSectionDesktop').style.display = 'none';
+            document.getElementById('modalCommentDesktop').value = '';
+            currentSelectedRating = null;
+            var productCardStars = document.querySelector('.rating-stars[data-product-id="' + productId + '"]');
+            if (productCardStars) { updateCardRating(productCardStars, parseFloat(data.avg_rating)); }
+        }
+    })
+    .catch(function(error) { console.error('Ошибка:', error); showToast('Ошибка при сохранении оценки', true); });
+}
+
+var modalDesktop = document.getElementById('productModalDesktop');
+var closeProductBtn = document.getElementById('closeProductModalDesktop');
+if (modalDesktop && closeProductBtn) {
+    closeProductBtn.addEventListener('click', closeProductModalDesktop);
+    modalDesktop.addEventListener('click', function(e) { if (e.target === modalDesktop) closeProductModalDesktop(); });
+}
+
+var track = document.querySelector('.player-carousel .carousel-track');
+var track2 = document.querySelector('.player-carousel2 .carousel-track2');
+if (track) { track.addEventListener('mouseenter', function() { track.style.animationPlayState = 'paused'; }); track.addEventListener('mouseleave', function() { track.style.animationPlayState = 'running'; }); }
+if (track2) { track2.addEventListener('mouseenter', function() { track2.style.animationPlayState = 'paused'; }); track2.addEventListener('mouseleave', function() { track2.style.animationPlayState = 'running'; }); }
+
+var modal = document.getElementById('playerModal');
+var closeBtn = document.getElementById('closeModal');
+function closeModal() { modal.classList.remove('active'); if (track) track.style.animationPlayState = 'running'; if (track2) track2.style.animationPlayState = 'running'; }
+if (closeBtn) closeBtn.addEventListener('click', closeModal);
+if (modal) modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+
+var viewBtns = document.querySelectorAll('.view-btn');
+for (var i = 0; i < viewBtns.length; i++) {
+    viewBtns[i].addEventListener('click', function(e) { e.stopPropagation(); var card = this.closest('.card'); if (!card) return; openPlayerModal(card.dataset.playerId, card.dataset.name, card.dataset.price, card.dataset.image, card.dataset.description); });
+}
+
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape' && modal && modal.classList.contains('active')) closeModal(); if (e.key === 'Escape' && document.getElementById('productModalDesktop') && document.getElementById('productModalDesktop').classList.contains('active')) closeProductModalDesktop(); });
+
+var addToCartForm = document.getElementById('addToCartForm');
+if (addToCartForm) { addToCartForm.addEventListener('submit', function() { setTimeout(closeModal, 100); }); }
+
+function addToCartMobile(id) { fetch('/api/cart/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) }).then(function() { showToastMobile('Товар добавлен в корзину', false); }); }
+function toggleFavoriteMobile(id) { fetch('/api/favorites/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) }).then(function() { showToastMobile('Добавлено в избранное', false); }); }
+function showToastMobile(message, isError) { const toast = document.createElement('div'); toast.className = 'toast-notification'; toast.innerHTML = '<div style="display:flex;align-items:center;gap:8px">' + '<span>' + (isError ? '❌' : '✅') + '</span>' + '<span>' + message + '</span>' + '</div>'; document.body.appendChild(toast); setTimeout(function() { if (toast && toast.remove) toast.remove(); }, 3000); }
+</script>
+</body>
+</html>`);
+        }
+    } catch (err) {
+        console.error("Ошибка главной страницы:", err);
+        res.status(500).send("Ошибка загрузки главной страницы");
+    }
 });
 
 // ============================================================
