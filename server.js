@@ -2351,197 +2351,442 @@ app.get("/", (req, res) => {
 });
 
 // ============================================================
-// ПРОФИЛЬ
+// ===================== ПРОФИЛЬ ==============================
 // ============================================================
+
 app.get("/profile", requireAuth, (req, res) => {
     const user = req.session.user;
-    try {
-        const userData = db.prepare("SELECT avatar FROM users WHERE id = ?").get(user.id);
-        const avatar = userData ? userData.avatar : 'default-avatar.png';
-        const favs = db.prepare("SELECT COUNT(*) as favs FROM favorites WHERE user_id = ?").get(user.id);
-        const favCount = favs ? favs.favs : 0;
-        
-        const content = `
-        <style>
-        .profile-wrapper { max-width: 600px; margin: 0 auto; }
-        .profile-card { background: #1a1a1a; border-radius: 20px; overflow: hidden; }
-        .profile-cover { height: 100px; background: linear-gradient(135deg, #ff0000, #990000); }
-        .profile-avatar-wrapper { text-align: center; margin-top: -50px; }
-        .profile-avatar { width: 100px; height: 100px; border-radius: 50%; border: 4px solid #1a1a1a; object-fit: cover; cursor: pointer; }
-        .profile-name { text-align: center; font-size: 24px; margin-top: 10px; }
-        .profile-role { text-align: center; color: #ff4444; margin-top: 5px; }
-        .profile-stats { display: flex; justify-content: center; gap: 30px; padding: 20px; background: #222; margin: 20px; border-radius: 15px; }
-        .stat { text-align: center; }
-        .stat-value { font-size: 24px; font-weight: bold; color: #ff4444; }
-        .stat-label { color: #888; font-size: 12px; }
-        .profile-menu { margin: 20px; }
-        .menu-item { display: flex; align-items: center; gap: 15px; padding: 15px; background: #222; border-radius: 12px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
-        .menu-item:hover { background: #ff000020; }
-        .admin-panel-btn, .logout-btn { display: block; margin: 15px 20px; padding: 15px; text-align: center; border-radius: 12px; text-decoration: none; transition: all 0.2s; }
-        .admin-panel-btn { background: linear-gradient(45deg, #ff0000, #990000); color: white; }
-        .logout-btn { background: #333; color: #ff4444; border: 1px solid #ff4444; }
-        .favorite-item { display: flex; align-items: center; gap: 15px; padding: 12px; background: #222; border-radius: 12px; margin-bottom: 10px; }
-        </style>
-        
-        <div class="profile-wrapper">
-            <div class="profile-card">
-                <div class="profile-cover"></div>
-                <div class="profile-avatar-wrapper">
-                    <img src="/avatars/${avatar}" class="profile-avatar" id="profileAvatar" onclick="openAvatarModal()" onerror="this.src='/avatars/default-avatar.png'">
-                </div>
-                <h2 class="profile-name">${escapeHtml(user.username)}</h2>
-                <div class="profile-role">${user.role === 'admin' ? 'Администратор' : 'Меломан'}</div>
-                <div class="profile-stats">
-                    <div class="stat"><div class="stat-value">0</div><div class="stat-label">Заказов</div></div>
-                    <div class="stat"><div class="stat-value" id="favCount">${favCount}</div><div class="stat-label">Избранное</div></div>
-                </div>
-                <div class="profile-menu">
-                    <div class="menu-item" onclick="openSettingsModal()"><i class="fas fa-user-edit"></i><span>Настройки аккаунта</span><i class="fas fa-chevron-right"></i></div>
-                    <div class="menu-item" onclick="openFavoritesModal()"><i class="fas fa-heart"></i><span>Избранное</span><i class="fas fa-chevron-right"></i></div>
-                </div>
-                ${user.role === 'admin' ? '<a href="/admin" class="admin-panel-btn"><i class="fas fa-crown"></i> Админ панель</a>' : ''}
-                <a href="/logout" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Выйти</a>
-            </div>
+    const userData = db.prepare("SELECT avatar FROM users WHERE id = ?").get(user.id);
+    const avatar = userData ? userData.avatar : 'default-avatar.png';
+    const favs = db.prepare("SELECT COUNT(*) as favs FROM favorites WHERE user_id = ?").get(user.id);
+    const favCount = favs ? favs.favs : 0;
+    
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Мой профиль · Plastinka</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:linear-gradient(135deg,#0a0a0a 0%,#0f0f0f 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#fff;}
+header{position:sticky;top:0;z-index:1000;display:flex;justify-content:space-between;align-items:center;padding:15px 5%;background:#0a0a0a;box-shadow:0 2px 10px rgba(0,0,0,0.3);min-height:80px}
+.logo{flex-shrink:0;z-index:2}.logo img{height:50px;width:auto;display:block}
+.search-bar-desktop{position:absolute;left:40%;transform:translateX(-50%);width:100%;max-width:500px;min-width:250px;background:#1a1a1a;border-radius:40px;padding:10px 20px;display:flex;align-items:center;gap:10px;border:1px solid #333;transition:border-color 0.2s;z-index:1}
+.search-bar-desktop:hover,.search-bar-desktop:focus-within{border-color:#ff0000;background:#111}
+.search-bar-desktop i{color:#ff0000;font-size:18px}
+.search-bar-desktop input{flex:1;background:transparent;border:none;color:#fff;font-size:16px;outline:none}
+.search-bar-desktop input::placeholder{color:#888}
+.right-icons{display:flex;gap:20px;align-items:center;flex-shrink:0;margin-left:auto;z-index:2}
+.right-icons a{display:flex;align-items:center;transition:all 0.25s ease;line-height:0}
+.right-icons a:hover{transform:scale(1.1);filter:drop-shadow(0 0 8px rgba(255, 0, 0, 0.5))}
+.right-icons img{height:40px;width:auto;display:block}
+@media(max-width:900px){.search-bar-desktop{max-width:350px}}
+@media(max-width:768px){header{position:relative;justify-content:flex-start;gap:15px;min-height:auto;flex-wrap:wrap}.search-bar-desktop{position:relative;left:auto;transform:none;max-width:none;flex:1 1 200px;order:1}.right-icons{order:2;gap:15px;margin-left:0}.right-icons img{height:40px}.logo img{height:45px}}
+@media(max-width:550px){header{flex-direction:column;align-items:stretch}.logo{text-align:center}.search-bar-desktop{width:100%;max-width:100%;order:1}.right-icons{justify-content:center;order:2;gap:25px;flex-wrap:wrap}.right-icons img{height:40px}}
+@media(max-width:480px){.logo img{height:40px}.right-icons img{height:35px}.right-icons{gap:20px}}
+
+.profile-wrapper{max-width:1000px;margin:40px auto;padding:0 20px}
+.profile-card{background:rgba(24,24,24,0.95);backdrop-filter:blur(10px);border-radius:32px;border:1px solid rgba(255,0,0,0.3);overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,0.4)}
+.profile-cover{height:160px;background:linear-gradient(135deg,#ff0000,#990000);position:relative}
+.profile-avatar-wrapper{position:relative;text-align:center;margin-top:-70px;z-index:2}
+.profile-avatar{width:130px;height:130px;border-radius:50%;border:5px solid #1a1a1a;object-fit:cover;background:#0a0a0a;box-shadow:0 5px 15px rgba(0,0,0,0.3);cursor:pointer;transition:0.3s}
+.profile-avatar:hover{opacity:0.8;transform:scale(1.02)}
+.avatar-overlay{position:absolute;bottom:5px;right:5px;background:#ff0000;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid #1a1a1a;transition:0.3s}
+.avatar-overlay:hover{transform:scale(1.1)}
+.avatar-overlay i{color:white;font-size:16px}
+.profile-name{text-align:center;font-size:32px;font-weight:700;margin-top:15px;letter-spacing:1px}
+.profile-role{text-align:center;color:#ff4444;font-size:16px;margin-top:5px;text-transform:uppercase;font-weight:600}
+.profile-stats{display:flex;justify-content:center;gap:60px;padding:25px;background:rgba(0,0,0,0.3);margin:25px 30px;border-radius:24px;flex-wrap:wrap}
+.stat{text-align:center;padding:10px 20px;background:rgba(255,255,255,0.05);border-radius:20px;min-width:120px}
+.stat-value{font-size:32px;font-weight:bold;color:#ff4444}
+.stat-label{color:#aaa;font-size:13px;margin-top:5px}
+.profile-menu{margin:20px 30px 30px;display:flex;flex-direction:column;gap:12px}
+.menu-item{display:flex;align-items:center;gap:18px;padding:16px 20px;background:rgba(10,10,10,0.6);border-radius:20px;text-decoration:none;color:white;transition:all 0.2s;border:1px solid #333;cursor:pointer}
+.menu-item:hover{background:rgba(255,0,0,0.1);border-color:#ff0000;transform:translateX(8px)}
+.menu-item i:first-child{width:30px;font-size:20px;color:#ff4444}
+.menu-item span{flex:1;font-size:16px}
+.arrow{color:#666;font-size:14px}
+.admin-panel-btn,.logout-btn{display:block;margin:15px 30px;padding:16px;text-align:center;border-radius:20px;font-weight:bold;font-size:16px;transition:0.2s;text-decoration:none}
+.admin-panel-btn{background:linear-gradient(45deg,#ff0000,#990000);color:white;box-shadow:0 5px 15px rgba(255,0,0,0.3)}
+.admin-panel-btn:hover{transform:translateY(-3px);box-shadow:0 8px 25px rgba(255,0,0,0.4)}
+.logout-btn{background:transparent;color:#ff4444;border:1px solid #ff4444}
+.logout-btn:hover{background:rgba(255,68,68,0.1);transform:translateY(-2px)}
+footer{text-align:center;padding:40px;background:#0a0a0a;margin-top:60px}
+.footer-logo{height:40px}
+
+.modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);backdrop-filter:blur(5px);z-index:1000;justify-content:center;align-items:center}
+.modal-content{background:linear-gradient(145deg,#2a2a2a,#1e1e1e);border-radius:20px;padding:30px;max-width:500px;width:90%;position:relative;border:1px solid #ff7a2f}
+.modal-content h3{color:#ff7a2f;margin-bottom:20px}
+.modal-content input,.modal-content textarea{width:100%;padding:12px;margin-bottom:15px;background:#111;border:1px solid #333;border-radius:8px;color:#fff}
+.modal-content textarea{resize:vertical;min-height:80px}
+.modal-buttons{display:flex;gap:10px;margin-top:10px}
+.modal-buttons button{flex:1;padding:12px;border-radius:8px;font-weight:bold;cursor:pointer}
+.modal-buttons button[type="submit"]{background:linear-gradient(45deg,#ff0000,#990000);border:none;color:white}
+.modal-buttons button[type="button"]{background:#333;border:none;color:#fff}
+.modal-close{position:absolute;top:15px;right:15px;background:rgba(255,0,0,0.1);border:none;color:#fff;font-size:30px;cursor:pointer;width:40px;height:40px;border-radius:50%;transition:0.3s}
+.modal-close:hover{background:#ff0000;transform:rotate(90deg)}
+@media(max-width:600px){.profile-wrapper{margin:20px auto}.profile-stats{gap:20px;margin:15px;padding:15px}.stat{min-width:80px;padding:8px 12px}.stat-value{font-size:24px}.profile-name{font-size:24px}.profile-avatar{width:100px;height:100px;margin-top:-50px}.profile-cover{height:120px}}
+
+.favorite-item{display:flex;align-items:center;gap:15px;padding:12px;background:rgba(255,255,255,0.05);border-radius:16px;border:1px solid #333;transition:all 0.2s}
+.favorite-item:hover{background:rgba(255,255,255,0.1);border-color:#ff7a2f;transform:translateX(5px)}
+.toast-notification{position:fixed;bottom:20px;right:20px;background:#4CAF50;color:white;padding:10px 20px;border-radius:8px;z-index:10000;animation:fadeOut 2s forwards;font-size:14px}
+@keyframes fadeOut{0%{opacity:1}70%{opacity:1}100%{opacity:0;visibility:hidden}}
+
+.modal-player-image{width:100%;border-radius:12px;margin-bottom:15px}
+.modal-title{font-size:28px;color:#ff7a2f;margin-bottom:5px}
+.modal-artist{color:#aaa;margin-bottom:15px}
+.modal-tags{display:flex;gap:10px;margin-bottom:20px}
+.modal-tag{background:rgba(255,122,47,0.2);padding:5px 12px;border-radius:20px;font-size:12px;color:#ff7a2f}
+.rating-stars-large{display:flex;gap:5px;margin:10px 0}
+.rating-stars-large .star{font-size:24px;cursor:pointer;transition:0.2s}
+.rating-stars-large .star:hover{transform:scale(1.1);color:#ff7a2f}
+.comments-list{max-height:300px;overflow-y:auto;margin:15px 0}
+.comment-item{border-bottom:1px solid #333;padding:10px 0}
+.modal-price{font-size:32px;font-weight:bold;color:#ff7a2f;margin:15px 0}
+.modal-actions{display:flex;gap:10px;margin:15px 0}
+.modal-add-to-cart{flex:1;background:linear-gradient(45deg,#ff7a2f,#ff0000);border:none;color:white;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold}
+.modal-fav-btn{width:50px;background:rgba(255,255,255,0.1);border:1px solid #ff0000;border-radius:8px;cursor:pointer;transition:0.2s}
+</style>
+</head>
+<body>
+<header>
+    <div class="logo"><a href="/"><img src="/photo/logo.svg" alt="Plastinka"></a></div>
+    <div class="search-bar-desktop"><i class="fas fa-search"></i><input type="text" id="desktop-search-input" placeholder="Поиск пластинок..."></div>
+    <div class="right-icons">
+        <a href="/catalog"><img src="/photo/icon-katalog.png" alt="Каталог"></a>
+        <a href="/profile"><img src="/photo/profile_icon.png" alt="Профиль"></a>
+        <a href="/cart"><img src="/photo/knopka-korzina.svg" alt="Корзина"></a>
+    </div>
+</header>
+<script>
+const searchInput=document.getElementById('desktop-search-input');
+if(searchInput){searchInput.addEventListener('keypress',function(e){if(e.key==='Enter'){const q=encodeURIComponent(this.value);if(q)window.location.href='/catalog?search='+q;}});}
+</script>
+
+<!-- Модальное окно товара -->
+<div id="productModal" class="modal-overlay">
+    <div class="modal-content" style="max-width:400px;max-height:90vh;overflow-y:auto">
+        <button class="modal-close" onclick="closeProductModal()">&times;</button>
+        <img src="" alt="Товар" class="modal-player-image" id="productModalImage">
+        <h2 class="modal-title" id="productModalTitle"></h2>
+        <p class="modal-artist" id="productModalArtist"></p>
+        <div class="modal-tags" id="productModalTags"></div>
+        <div class="rating-stars-large" id="modalRatingStars">
+            <i class="far fa-star star" data-value="1"></i>
+            <i class="far fa-star star" data-value="2"></i>
+            <i class="far fa-star star" data-value="3"></i>
+            <i class="far fa-star star" data-value="4"></i>
+            <i class="far fa-star star" data-value="5"></i>
         </div>
-        
-        <div id="avatarModal" class="modal-overlay">
-            <div class="modal-content" style="text-align:center">
-                <button class="modal-close" onclick="closeAvatarModal()">&times;</button>
-                <h3 style="color:#ff7a2f">📸 Изменить аватар</h3>
-                <div style="width:120px;height:120px;margin:20px auto;border-radius:50%;overflow:hidden;border:3px solid #ff7a2f">
-                    <img src="/avatars/${avatar}" id="avatarPreview" style="width:100%;height:100%;object-fit:cover">
-                </div>
-                <input type="file" id="avatarFileInput" accept="image/*" style="display:none">
-                <button onclick="document.getElementById('avatarFileInput').click()" style="background:rgba(255,122,47,0.2);border:1px solid #ff7a2f;color:#ff7a2f;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%">📁 Выбрать изображение</button>
-                <p id="avatarUploadMessage" style="margin-top:10px"></p>
-            </div>
+        <div class="rating-votes" id="modalRatingVotes" style="color:#666;font-size:12px">(0 оценок)</div>
+        <div class="comments-list" id="modalCommentsList"></div>
+        <p class="modal-description" id="productModalDescription"></p>
+        <div class="modal-price" id="productModalPrice"></div>
+        <div class="modal-actions">
+            <button onclick="addToCartFromModal()" class="modal-add-to-cart">В корзину</button>
+            <button onclick="toggleFavoriteFromModal()" class="modal-fav-btn" id="modalFavBtn"><i class="fas fa-heart"></i></button>
         </div>
-        
-        <div id="settingsModal" class="modal-overlay">
-            <div class="modal-content">
-                <button class="modal-close" onclick="closeSettingsModal()">&times;</button>
-                <h3 style="color:#ff7a2f">⚙️ Настройки</h3>
-                <form id="settingsForm">
-                    <div class="form-group" style="margin-bottom:15px">
-                        <label style="color:#aaa">Имя пользователя</label>
-                        <input type="text" id="settingsUsername" value="${escapeHtml(user.username)}" style="width:100%;padding:10px;background:#111;border:1px solid #333;color:#fff;border-radius:8px">
-                    </div>
-                    <div class="form-group" style="margin-bottom:15px">
-                        <label style="color:#aaa">Текущий пароль</label>
-                        <input type="password" id="settingsCurrentPassword" placeholder="Для смены пароля" style="width:100%;padding:10px;background:#111;border:1px solid #333;color:#fff;border-radius:8px">
-                    </div>
-                    <div class="form-group" style="margin-bottom:15px">
-                        <label style="color:#aaa">Новый пароль</label>
-                        <input type="password" id="settingsNewPassword" placeholder="Новый пароль" style="width:100%;padding:10px;background:#111;border:1px solid #333;color:#fff;border-radius:8px">
-                    </div>
-                    <button type="submit" style="width:100%;padding:12px;background:linear-gradient(45deg,#ff0000,#990000);border:none;border-radius:8px;color:white;cursor:pointer">Сохранить</button>
-                </form>
-                <p id="settingsMessage" style="margin-top:15px;text-align:center"></p>
+    </div>
+</div>
+
+<div class="profile-wrapper">
+    <div class="profile-card">
+        <div class="profile-cover"></div>
+        <div class="profile-avatar-wrapper">
+            <div class="avatar-container" style="position:relative;display:inline-block">
+                <img src="/avatars/${avatar}" class="profile-avatar" id="profileAvatar">
+                <div class="avatar-overlay" onclick="openAvatarModal()"><i class="fas fa-camera"></i></div>
             </div>
+            <h2 class="profile-name">${escapeHtml(user.username)}</h2>
+            <div class="profile-role">${user.role === 'admin' ? 'Администратор' : '🎧 Меломан'}</div>
         </div>
-        
-        <div id="favoritesModal" class="modal-overlay">
-            <div class="modal-content" style="max-width:600px;max-height:80vh;overflow-y:auto">
-                <button class="modal-close" onclick="closeFavoritesModal()">&times;</button>
-                <h3 style="color:#ff7a2f"><i class="fas fa-heart"></i> Избранное</h3>
-                <div id="favoritesList">Загрузка...</div>
-            </div>
+        <div class="profile-stats">
+            <div class="stat"><div class="stat-value">0</div><div class="stat-label">Заказов</div></div>
+            <div class="stat"><div class="stat-value" id="favCount">${favCount}</div><div class="stat-label">Избранное</div></div>
+            <div class="stat"><div class="stat-value">—</div><div class="stat-label">На сайте</div></div>
         </div>
-        
-        <script>
-        async function openAvatarModal() { document.getElementById('avatarModal').style.display = 'flex'; }
-        function closeAvatarModal() { document.getElementById('avatarModal').style.display = 'none'; }
-        
-        document.getElementById('avatarFileInput').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const formData = new FormData();
-            formData.append('avatar', file);
-            const res = await fetch('/api/upload-avatar', { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.success) {
-                document.getElementById('profileAvatar').src = data.avatar + '?t=' + Date.now();
-                document.getElementById('avatarPreview').src = data.avatar + '?t=' + Date.now();
-                document.getElementById('avatarUploadMessage').innerHTML = '<span style="color:#4CAF50;">✅ Обновлено!</span>';
-                setTimeout(closeAvatarModal, 1500);
-            }
-        });
-        
-        function openSettingsModal() { document.getElementById('settingsModal').style.display = 'flex'; }
-        function closeSettingsModal() { document.getElementById('settingsModal').style.display = 'none'; }
-        
-        document.getElementById('settingsForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const username = document.getElementById('settingsUsername').value;
-            const currentPassword = document.getElementById('settingsCurrentPassword').value;
-            const newPassword = document.getElementById('settingsNewPassword').value;
-            const res = await fetch('/api/update-profile', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, currentPassword, newPassword })
-            });
-            const data = await res.json();
-            if (data.success) {
-                document.getElementById('settingsMessage').innerHTML = '<span style="color:#4CAF50;">✅ Сохранено!</span>';
-                setTimeout(() => location.reload(), 1500);
-            } else {
-                document.getElementById('settingsMessage').innerHTML = '<span style="color:#ff4444;">❌ ' + data.error + '</span>';
-            }
-        });
-        
-        function openFavoritesModal() { document.getElementById('favoritesModal').style.display = 'flex'; loadFavoritesList(); }
-        function closeFavoritesModal() { document.getElementById('favoritesModal').style.display = 'none'; }
-        
-        async function loadFavoritesList() {
-            const container = document.getElementById('favoritesList');
-            const res = await fetch('/api/favorites/list');
-            const data = await res.json();
-            if (!data.success || data.favorites.length === 0) {
-                container.innerHTML = '<div style="text-align:center;padding:40px;color:#666">Нет избранных товаров</div>';
-                return;
-            }
-            let html = '';
-            for (const item of data.favorites) {
-                const imgPath = item.type === 'product' ? '/uploads/' + item.image : '/photo/' + item.image;
-                html += '<div class="favorite-item">' +
-                    '<img src="' + imgPath + '" style="width:50px;height:50px;object-fit:cover;border-radius:8px" onerror="this.src=\'/photo/plastinka-audio.png\'">' +
-                    '<div style="flex:1"><div><strong>' + escapeHtml(item.name) + '</strong></div><div style="color:#aaa">' + escapeHtml(item.artist) + '</div><div style="color:#ff7a2f">$' + item.price + '</div></div>' +
-                    '<button onclick="removeFromFav(' + item.id + ', \'' + item.type + '\')" style="background:#ff444420;border:none;color:#ff4444;padding:8px 12px;border-radius:8px;cursor:pointer"><i class="fas fa-trash"></i></button>' +
-                    '</div>';
-            }
-            container.innerHTML = html;
-        }
-        
-        async function removeFromFav(productId, type) {
-            const res = await fetch('/api/favorites/remove', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ productId, type })
-            });
-            if (res.ok) {
-                showToast('Удалено из избранного');
-                loadFavoritesList();
-                const favCountSpan = document.getElementById('favCount');
-                if (favCountSpan) favCountSpan.textContent = parseInt(favCountSpan.textContent) - 1;
-            }
-        }
-        
-        function showToast(msg) {
-            const toast = document.createElement('div');
-            toast.className = 'toast-notification';
-            toast.innerHTML = '✅ ' + msg;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 2500);
-        }
-        </script>
-        `;
-        
-        res.send(renderPage('Мой профиль', content, user, 'profile'));
-    } catch (err) {
-        console.error("Ошибка профиля:", err);
-        res.status(500).send("Ошибка загрузки профиля");
+        <div class="profile-menu">
+            <div class="menu-item" onclick="openSettingsModal()"><i class="fas fa-user-edit"></i><span>Настройки аккаунта</span><i class="fas fa-chevron-right arrow"></i></div>
+            <div class="menu-item" onclick="openFavoritesModal()"><i class="fas fa-heart"></i><span>Избранные пластинки</span><i class="fas fa-chevron-right arrow"></i></div>
+            <div class="menu-item" onclick="openSettingsModal()"><i class="fas fa-credit-card"></i><span>Способы оплаты</span><i class="fas fa-chevron-right arrow"></i></div>
+        </div>
+        ${user.role === 'admin' ? '<a href="/admin" class="admin-panel-btn"><i class="fas fa-crown"></i> Админ панель</a>' : ''}
+        <a href="/logout" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Выйти из аккаунта</a>
+    </div>
+</div>
+
+<!-- Модальное окно для аватарки -->
+<div id="avatarModal" class="modal-overlay">
+    <div class="modal-content" style="text-align:center">
+        <button class="modal-close" onclick="closeAvatarModal()">&times;</button>
+        <h3>📸 Изменить аватар</h3>
+        <div style="width:150px;height:150px;margin:20px auto;overflow:hidden;border-radius:50%;border:3px solid #ff7a2f">
+            <img src="/avatars/${avatar}" id="avatarPreview" style="width:100%;height:100%;object-fit:cover">
+        </div>
+        <input type="file" id="avatarFileInput" accept="image/*" style="display:none">
+        <button onclick="document.getElementById('avatarFileInput').click()" style="background:rgba(255,122,47,0.2);border:1px solid #ff7a2f;color:#ff7a2f;padding:10px;border-radius:8px;cursor:pointer;width:100%;margin-bottom:10px">📁 Выбрать изображение</button>
+        <div id="cropContainer" style="display:none;margin-top:15px">
+            <div style="width:100%;height:300px;margin-bottom:10px"><img id="cropImage" style="max-width:100%;max-height:100%"></div>
+            <button onclick="cropAndUpload()" style="background:linear-gradient(45deg,#ff7a2f,#ff0000);border:none;color:white;padding:10px;border-radius:8px;cursor:pointer;width:100%">✂️ Обрезать и загрузить</button>
+        </div>
+        <p id="avatarUploadMessage" style="margin-top:10px;font-size:12px"></p>
+    </div>
+</div>
+
+<!-- Модальное окно для настроек -->
+<div id="settingsModal" class="modal-overlay">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeSettingsModal()">&times;</button>
+        <h3>⚙️ Настройки аккаунта</h3>
+        <form id="settingsForm">
+            <input type="text" id="settingsUsername" value="${escapeHtml(user.username)}" placeholder="Имя пользователя">
+            <input type="password" id="settingsCurrentPassword" placeholder="Текущий пароль (для смены)">
+            <input type="password" id="settingsNewPassword" placeholder="Новый пароль">
+            <div class="modal-buttons"><button type="submit">Сохранить</button><button type="button" onclick="closeSettingsModal()">Отмена</button></div>
+        </form>
+        <p id="settingsMessage" style="margin-top:15px;text-align:center;font-size:12px"></p>
+    </div>
+</div>
+
+<!-- Модальное окно избранного -->
+<div id="favoritesModal" class="modal-overlay">
+    <div class="modal-content" style="max-width:600px;max-height:80vh;overflow-y:auto">
+        <button class="modal-close" onclick="closeFavoritesModal()">&times;</button>
+        <h3><i class="fas fa-heart"></i> Моё избранное</h3>
+        <div id="favoritesList" style="display:flex;flex-direction:column;gap:15px"><div style="text-align:center;padding:40px;color:#666"><i class="fas fa-spinner fa-spin"></i><br>Загрузка...</div></div>
+    </div>
+</div>
+
+<footer><img src="/photo/logo-2.svg" class="footer-logo" alt="Plastinka"></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
+<script>
+let cropper = null;
+let currentModalProductId = null;
+let currentModalProductType = null;
+let currentModalProductRealId = null;
+
+function openAvatarModal() { document.getElementById('avatarModal').style.display = 'flex'; }
+function closeAvatarModal() { 
+    document.getElementById('avatarModal').style.display = 'none';
+    if(cropper){cropper.destroy();cropper=null;}
+    document.getElementById('cropImage').src='';
+    document.getElementById('cropContainer').style.display='none';
+}
+
+document.getElementById('avatarFileInput').addEventListener('change', function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+        const cropImage = document.getElementById('cropImage');
+        cropImage.src = ev.target.result;
+        document.getElementById('cropContainer').style.display = 'block';
+        if(cropper) cropper.destroy();
+        setTimeout(()=>{
+            cropper = new Cropper(cropImage, {aspectRatio:1, viewMode:1, dragMode:'move', cropBoxMovable:true, cropBoxResizable:true, background:false, modal:true, guides:true, center:true, highlight:true, autoCropArea:1});
+        },100);
+    };
+    reader.readAsDataURL(file);
+});
+
+function cropAndUpload(){
+    if(!cropper){ showToast('Сначала выберите изображение', true); return; }
+    const canvas = cropper.getCroppedCanvas({width:300,height:300});
+    canvas.toBlob((blob)=>{
+        const formData = new FormData();
+        formData.append('avatar', blob, 'avatar.jpg');
+        fetch('/api/upload-avatar', {method:'POST', body:formData})
+            .then(r=>r.json())
+            .then(data=>{
+                if(data.success){
+                    document.getElementById('profileAvatar').src = data.avatar + '?t='+Date.now();
+                    document.getElementById('avatarPreview').src = data.avatar + '?t='+Date.now();
+                    showToast('Аватар обновлен!');
+                    setTimeout(closeAvatarModal,1500);
+                } else { showToast('Ошибка загрузки', true); }
+            }).catch(()=>showToast('Ошибка загрузки', true));
+    },'image/jpeg',0.9);
+}
+
+function openSettingsModal() { document.getElementById('settingsModal').style.display = 'flex'; }
+function closeSettingsModal() { document.getElementById('settingsModal').style.display = 'none'; }
+
+document.getElementById('settingsForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const username = document.getElementById('settingsUsername').value;
+    const currentPassword = document.getElementById('settingsCurrentPassword').value;
+    const newPassword = document.getElementById('settingsNewPassword').value;
+    const res = await fetch('/api/update-profile', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,currentPassword,newPassword})});
+    const data = await res.json();
+    if(data.success){
+        document.getElementById('settingsMessage').innerHTML = '<span style="color:#4CAF50">✅ Сохранено!</span>';
+        setTimeout(()=>{ closeSettingsModal(); location.reload(); },1500);
+    } else {
+        document.getElementById('settingsMessage').innerHTML = '<span style="color:#ff4444">❌ '+data.error+'</span>';
     }
 });
+
+function openFavoritesModal() { document.getElementById('favoritesModal').style.display = 'flex'; loadFavoritesList(); }
+function closeFavoritesModal() { document.getElementById('favoritesModal').style.display = 'none'; }
+
+async function loadFavoritesList(){
+    const container = document.getElementById('favoritesList');
+    try{
+        const res = await fetch('/api/favorites/list');
+        const data = await res.json();
+        if(!data.success || data.favorites.length===0){
+            container.innerHTML = '<div style="text-align:center;padding:40px;color:#666"><i class="fas fa-heart-broken" style="font-size:40px"></i><br>Нет избранных товаров<br><a href="/catalog" style="color:#ff7a2f">Перейти в каталог →</a></div>';
+            return;
+        }
+        let html = '';
+        for(const item of data.favorites){
+            const imgPath = item.type === 'product' ? '/uploads/'+item.image : '/photo/'+item.image;
+            html += '<div class="favorite-item">'+
+                '<img src="'+imgPath+'" style="width:70px;height:70px;object-fit:cover;border-radius:8px" onerror="this.src=\'/photo/plastinka-audio.png\'">'+
+                '<div style="flex:1"><div><strong>'+escapeHtml(item.name)+'</strong></div><div style="color:#aaa">'+escapeHtml(item.artist)+'</div><div style="color:#ff7a2f">$'+item.price+'</div></div>'+
+                '<div style="display:flex;gap:8px">'+
+                '<button onclick="viewProduct('+item.id+', \'product\')" style="background:rgba(255,122,47,0.2);border:none;color:#ff7a2f;padding:8px 12px;border-radius:8px;cursor:pointer"><i class="fas fa-eye"></i></button>'+
+                '<button onclick="removeFromFav('+item.id+', \'product\')" style="background:rgba(255,68,68,0.2);border:none;color:#ff4444;padding:8px 12px;border-radius:8px;cursor:pointer"><i class="fas fa-trash"></i></button>'+
+                '</div></div>';
+        }
+        container.innerHTML = html;
+    } catch(e){ container.innerHTML = '<div style="text-align:center;padding:40px;color:#ff4444">Ошибка загрузки</div>'; }
+}
+
+async function removeFromFav(productId, type){
+    const res = await fetch('/api/favorites/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({productId,type})});
+    const data = await res.json();
+    if(data.success){
+        showToast('Удалено из избранного');
+        loadFavoritesList();
+        updateFavCount();
+    } else { showToast('Ошибка удаления', true); }
+}
+
+async function updateFavCount(){
+    const res = await fetch('/api/favorites/count');
+    const data = await res.json();
+    if(data.success){ const el = document.getElementById('favCount'); if(el) el.textContent = data.count; }
+}
+
+async function viewProduct(productId, type){
+    closeFavoritesModal();
+    currentModalProductRealId = productId;
+    currentModalProductType = type;
+    currentModalProductId = (type === 'product' ? 'product_' : 'player_') + productId;
+    
+    try{
+        const res = await fetch('/api/product?id='+productId+'&type='+type);
+        const data = await res.json();
+        document.getElementById('productModalImage').src = type === 'product' ? '/uploads/'+data.image : '/photo/'+data.image;
+        document.getElementById('productModalTitle').textContent = data.name || '';
+        document.getElementById('productModalArtist').textContent = data.artist || (type==='player'?'Проигрыватель':'');
+        document.getElementById('productModalDescription').textContent = data.description || 'Нет описания';
+        document.getElementById('productModalPrice').innerHTML = (data.price||0)+' <span>$</span>';
+        const tags = document.getElementById('productModalTags');
+        if(type==='product') tags.innerHTML = '<span class="modal-tag">'+(data.genre||'Не указан')+'</span><span class="modal-tag">'+(data.year||'Год не указан')+'</span>';
+        else tags.innerHTML = '<span class="modal-tag">Проигрыватель</span>';
+        
+        const ratingRes = await fetch('/api/rating/'+productId);
+        const ratingData = await ratingRes.json();
+        const avgRating = parseFloat(ratingData.avg_rating)||0;
+        const starsContainer = document.getElementById('modalRatingStars');
+        const starElements = starsContainer.querySelectorAll('.star');
+        starElements.forEach((star,idx)=>{
+            if(idx+1 <= Math.floor(avgRating)) star.className = 'fas fa-star star';
+            else if(avgRating - idx - 1 >= 0.5) star.className = 'fas fa-star-half-alt star';
+            else star.className = 'far fa-star star';
+            star.style.color = idx+1 <= Math.floor(avgRating) ? '#ff7a2f' : '#555';
+        });
+        document.getElementById('modalRatingVotes').textContent = '('+(ratingData.votes_count||0)+' оценок)';
+        
+        let commentsHtml = '';
+        if(ratingData.comments && ratingData.comments.length){
+            for(const c of ratingData.comments){
+                commentsHtml += '<div class="comment-item"><div style="display:flex;justify-content:space-between"><strong>'+escapeHtml(c.username)+'</strong><span style="color:#888;font-size:12px">'+new Date(c.created_at).toLocaleDateString()+'</span></div><div>'+'⭐'.repeat(c.rating)+'</div><div>'+escapeHtml(c.comment||'')+'</div></div>';
+            }
+        } else { commentsHtml = '<div class="comment-item" style="text-align:center;color:#666">📝 Пока нет комментариев</div>'; }
+        document.getElementById('modalCommentsList').innerHTML = commentsHtml;
+        
+        const favRes = await fetch('/api/favorites/status/'+currentModalProductId);
+        const favData = await favRes.json();
+        const favBtn = document.getElementById('modalFavBtn');
+        if(favData.isFavorite){
+            favBtn.style.background = '#ff0000';
+            favBtn.style.color = 'white';
+        } else {
+            favBtn.style.background = 'rgba(255,255,255,0.1)';
+            favBtn.style.color = 'white';
+        }
+        
+        document.getElementById('productModal').style.display = 'flex';
+    } catch(e){ showToast('Ошибка загрузки товара', true); }
+}
+
+async function addToCartFromModal(){
+    if(currentModalProductId){
+        await fetch('/api/cart/add', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:currentModalProductId})});
+        showToast('Товар добавлен в корзину');
+        closeProductModal();
+    }
+}
+
+async function toggleFavoriteFromModal(){
+    if(currentModalProductId){
+        const res = await fetch('/api/favorites/toggle', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:currentModalProductId})});
+        const data = await res.json();
+        const favBtn = document.getElementById('modalFavBtn');
+        if(data.action === 'added'){
+            favBtn.style.background = '#ff0000';
+            favBtn.style.color = 'white';
+            showToast('Добавлено в избранное');
+        } else {
+            favBtn.style.background = 'rgba(255,255,255,0.1)';
+            favBtn.style.color = 'white';
+            showToast('Удалено из избранного');
+        }
+        updateFavCount();
+    }
+}
+
+function closeProductModal(){
+    document.getElementById('productModal').style.display = 'none';
+}
+
+function showToast(msg, isError){
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+    toast.style.background = isError ? '#f44336' : '#4CAF50';
+    toast.innerHTML = (isError ? '❌ ' : '✅ ') + msg;
+    document.body.appendChild(toast);
+    setTimeout(()=>toast.remove(),2500);
+}
+
+function escapeHtml(str){ if(!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+</script>
+</body>
+</html>`);
+});
+
+// ============================================================
+// ===================== API ДЛЯ ПРОФИЛЯ =====================
+// ============================================================
+
+app.get("/api/product", (req, res) => {
+    const { id, type } = req.query;
+    if(type === 'product'){
+        const product = db.prepare("SELECT * FROM products WHERE id = ?").get(id);
+        res.json(product || {});
+    } else {
+        const player = db.prepare("SELECT * FROM players WHERE id = ?").get(id);
+        res.json(player || {});
+    }
+});
+
 
 // ============================================================
 // КОРЗИНА
